@@ -20,7 +20,20 @@ import type {
   BorrowingRecord,
   Donation,
   LibraryNotification,
+  User,
 } from '../types';
+
+interface LoginResult {
+  success: boolean;
+  error?: string;
+}
+
+interface AuthResponse {
+  success: boolean;
+  token?: string;
+  user?: User;
+  message?: string;
+}
 
 interface LibraryContextValue {
   books: Book[];
@@ -28,6 +41,16 @@ interface LibraryContextValue {
   donations: Donation[];
   assistants: AssistantAccount[];
   notifications: LibraryNotification[];
+
+  currentUser: User | null;
+
+  login: (
+    universityId: string,
+    role: User['role'],
+    password: string,
+  ) => Promise<LoginResult>;
+
+  logout: () => void;
 }
 
 interface LibraryProviderProps {
@@ -40,6 +63,8 @@ const STORAGE_KEYS = {
   donations: 'lms_donations',
   assistants: 'lms_assistants',
   notifications: 'lms_notifications',
+  currentUser: 'lms_current_user',
+  jwtToken: 'lms_jwt_token',
 } as const;
 
 function loadFromStorage<T>(key: string, fallback: T): T {
@@ -53,7 +78,7 @@ function loadFromStorage<T>(key: string, fallback: T): T {
     return JSON.parse(storedValue) as T;
   } catch {
     console.warn(
-      `Invalid persisted library data was found for "${key}". Seed data will be restored.`,
+      `Invalid persisted library data was found for "${key}". Fallback data will be used.`,
     );
 
     localStorage.removeItem(key);
@@ -90,6 +115,13 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
     ),
   );
 
+  const [currentUser, setCurrentUser] = useState<User | null>(() =>
+    loadFromStorage<User | null>(
+      STORAGE_KEYS.currentUser,
+      null,
+    ),
+  );
+
   useEffect(() => {
     localStorage.setItem(
       STORAGE_KEYS.books,
@@ -123,12 +155,113 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
     notifications,
   ]);
 
+  useEffect(() => {
+    const token = localStorage.getItem(STORAGE_KEYS.jwtToken);
+
+    if (!token) {
+      if (currentUser) {
+        setCurrentUser(null);
+        localStorage.removeItem(STORAGE_KEYS.currentUser);
+      }
+
+      return;
+    }
+
+    fetch('/api/verify', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then(async (response) => {
+        const data = (await response.json()) as AuthResponse;
+
+        if (!response.ok || !data.success) {
+          setCurrentUser(null);
+          localStorage.removeItem(STORAGE_KEYS.currentUser);
+          localStorage.removeItem(STORAGE_KEYS.jwtToken);
+        }
+      })
+      .catch(() => {
+        console.warn(
+          'Authentication token could not be verified because the server is unavailable.',
+        );
+      });
+  }, []);
+
+  const login = async (
+    universityId: string,
+    role: User['role'],
+    password: string,
+  ): Promise<LoginResult> => {
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          universityId,
+          role,
+          password,
+        }),
+      });
+
+      const data = (await response.json()) as AuthResponse;
+
+      if (
+        !response.ok ||
+        !data.success ||
+        !data.token ||
+        !data.user
+      ) {
+        return {
+          success: false,
+          error:
+            data.message ??
+            'Authentication failed. Please check your credentials.',
+        };
+      }
+
+      setCurrentUser(data.user);
+
+      localStorage.setItem(
+        STORAGE_KEYS.currentUser,
+        JSON.stringify(data.user),
+      );
+
+      localStorage.setItem(
+        STORAGE_KEYS.jwtToken,
+        data.token,
+      );
+
+      return {
+        success: true,
+      };
+    } catch {
+      return {
+        success: false,
+        error:
+          'The authentication server could not be reached. Please try again.',
+      };
+    }
+  };
+
+  const logout = () => {
+    setCurrentUser(null);
+
+    localStorage.removeItem(STORAGE_KEYS.currentUser);
+    localStorage.removeItem(STORAGE_KEYS.jwtToken);
+  };
+
   const value: LibraryContextValue = {
     books,
     records,
     donations,
     assistants,
     notifications,
+    currentUser,
+    login,
+    logout,
   };
 
   return (
