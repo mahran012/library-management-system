@@ -28,6 +28,11 @@ interface LoginResult {
   error?: string;
 }
 
+interface ActionResult {
+  success: boolean;
+  message: string;
+}
+
 interface AuthResponse {
   success: boolean;
   token?: string;
@@ -51,6 +56,8 @@ interface LibraryContextValue {
   ) => Promise<LoginResult>;
 
   logout: () => void;
+
+  requestBorrow: (bookId: string) => ActionResult;
 }
 
 interface LibraryProviderProps {
@@ -87,6 +94,17 @@ function loadFromStorage<T>(key: string, fallback: T): T {
   }
 }
 
+function toDateString(date: Date) {
+  return date.toISOString().split('T')[0];
+}
+
+function addDays(date: Date, numberOfDays: number) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + numberOfDays);
+
+  return result;
+}
+
 const LibraryContext = createContext<LibraryContextValue | undefined>(
   undefined,
 );
@@ -96,7 +114,7 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
     loadFromStorage(STORAGE_KEYS.books, INITIAL_BOOKS),
   );
 
-  const [records] = useState<BorrowingRecord[]>(() =>
+  const [records, setRecords] = useState<BorrowingRecord[]>(() =>
     loadFromStorage(STORAGE_KEYS.records, INITIAL_RECORDS),
   );
 
@@ -108,12 +126,13 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
     loadFromStorage(STORAGE_KEYS.assistants, INITIAL_ASSISTANTS),
   );
 
-  const [notifications] = useState<LibraryNotification[]>(() =>
-    loadFromStorage(
-      STORAGE_KEYS.notifications,
-      INITIAL_NOTIFICATIONS,
-    ),
-  );
+  const [notifications, setNotifications] =
+    useState<LibraryNotification[]>(() =>
+      loadFromStorage(
+        STORAGE_KEYS.notifications,
+        INITIAL_NOTIFICATIONS,
+      ),
+    );
 
   const [currentUser, setCurrentUser] = useState<User | null>(() =>
     loadFromStorage<User | null>(
@@ -253,6 +272,111 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
     localStorage.removeItem(STORAGE_KEYS.jwtToken);
   };
 
+  const hasOutstandingFines = (studentId: string) =>
+    records.some(
+      (record) =>
+        record.studentId === studentId &&
+        record.fineAmount > 0 &&
+        !record.finePaid,
+    );
+
+  const requestBorrow = (bookId: string): ActionResult => {
+    if (!currentUser || currentUser.role !== 'Student') {
+      return {
+        success: false,
+        message:
+          'Only authenticated students can request library books.',
+      };
+    }
+
+    const book = books.find(
+      (candidate) => candidate.id === bookId,
+    );
+
+    if (!book) {
+      return {
+        success: false,
+        message: 'The selected book could not be found.',
+      };
+    }
+
+    if (book.availableCopies <= 0) {
+      return {
+        success: false,
+        message:
+          'This book is currently unavailable for borrowing.',
+      };
+    }
+
+    if (hasOutstandingFines(currentUser.universityId)) {
+      return {
+        success: false,
+        message:
+          'Outstanding library fines must be settled before requesting another book.',
+      };
+    }
+
+    const duplicateRecord = records.some(
+      (record) =>
+        record.studentId === currentUser.universityId &&
+        record.bookId === book.id &&
+        record.status !== 'Returned',
+    );
+
+    if (duplicateRecord) {
+      return {
+        success: false,
+        message:
+          'You already have an active request or loan for this book.',
+      };
+    }
+
+    const requestDate = new Date();
+    const requestDateString = toDateString(requestDate);
+    const dueDateString = toDateString(
+      addDays(requestDate, 14),
+    );
+
+    const record: BorrowingRecord = {
+      id: `BR-${Date.now()}`,
+      studentId: currentUser.universityId,
+      studentName: currentUser.name,
+      bookId: book.id,
+      bookTitle: book.title,
+      borrowDate: requestDateString,
+      dueDate: dueDateString,
+      status: 'Requested',
+      fineAmount: 0,
+      finePaid: false,
+    };
+
+    const notification: LibraryNotification = {
+      id: `NT-${Date.now()}`,
+      userId: currentUser.universityId,
+      title: 'Borrow Request Submitted',
+      text: `Your request for "${book.title}" has been submitted for librarian approval.`,
+      type: 'Info',
+      date: requestDateString,
+      isRead: false,
+    };
+
+    setRecords((currentRecords) => [
+      record,
+      ...currentRecords,
+    ]);
+
+    setNotifications((currentNotifications) => [
+      notification,
+      ...currentNotifications,
+    ]);
+
+    return {
+      success: true,
+      message:
+        'Borrow request submitted successfully. A librarian must approve it before the book is issued.',
+    };
+  };
+
   const value: LibraryContextValue = {
     books,
     records,
@@ -262,6 +386,7 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
     currentUser,
     login,
     logout,
+    requestBorrow,
   };
 
   return (
