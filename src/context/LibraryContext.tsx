@@ -19,6 +19,8 @@ import type {
   Book,
   BorrowingRecord,
   Donation,
+  DonationType,
+  Genre,
   LibraryNotification,
   User,
 } from '../types';
@@ -40,24 +42,30 @@ interface AuthResponse {
   message?: string;
 }
 
+export interface DonationSubmission {
+  bookTitle: string;
+  author: string;
+  isbn: string;
+  genre: Genre;
+  donationType: DonationType;
+  durationMonths?: number;
+}
+
 interface LibraryContextValue {
   books: Book[];
   records: BorrowingRecord[];
   donations: Donation[];
   assistants: AssistantAccount[];
   notifications: LibraryNotification[];
-
   currentUser: User | null;
-
   login: (
     universityId: string,
     role: User['role'],
     password: string,
   ) => Promise<LoginResult>;
-
   logout: () => void;
-
   requestBorrow: (bookId: string) => ActionResult;
+  submitDonation: (submission: DonationSubmission) => ActionResult;
 }
 
 interface LibraryProviderProps {
@@ -74,6 +82,17 @@ const STORAGE_KEYS = {
   jwtToken: 'lms_jwt_token',
 } as const;
 
+const SUPPORTED_GENRES: Genre[] = [
+  'Algorithms',
+  'Systems',
+  'Web Dev',
+  'Databases',
+  'Architecture',
+  'AI/ML',
+  'DevOps',
+  'Languages',
+];
+
 function loadFromStorage<T>(key: string, fallback: T): T {
   const storedValue = localStorage.getItem(key);
 
@@ -87,21 +106,18 @@ function loadFromStorage<T>(key: string, fallback: T): T {
     console.warn(
       `Invalid persisted library data was found for "${key}". Fallback data will be used.`,
     );
-
     localStorage.removeItem(key);
-
     return fallback;
   }
 }
 
-function toDateString(date: Date) {
+function toDateString(date: Date): string {
   return date.toISOString().split('T')[0];
 }
 
-function addDays(date: Date, numberOfDays: number) {
+function addDays(date: Date, numberOfDays: number): Date {
   const result = new Date(date);
   result.setDate(result.getDate() + numberOfDays);
-
   return result;
 }
 
@@ -118,7 +134,7 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
     loadFromStorage(STORAGE_KEYS.records, INITIAL_RECORDS),
   );
 
-  const [donations] = useState<Donation[]>(() =>
+  const [donations, setDonations] = useState<Donation[]>(() =>
     loadFromStorage(STORAGE_KEYS.donations, INITIAL_DONATIONS),
   );
 
@@ -128,51 +144,23 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
 
   const [notifications, setNotifications] =
     useState<LibraryNotification[]>(() =>
-      loadFromStorage(
-        STORAGE_KEYS.notifications,
-        INITIAL_NOTIFICATIONS,
-      ),
+      loadFromStorage(STORAGE_KEYS.notifications, INITIAL_NOTIFICATIONS),
     );
 
   const [currentUser, setCurrentUser] = useState<User | null>(() =>
-    loadFromStorage<User | null>(
-      STORAGE_KEYS.currentUser,
-      null,
-    ),
+    loadFromStorage<User | null>(STORAGE_KEYS.currentUser, null),
   );
 
   useEffect(() => {
-    localStorage.setItem(
-      STORAGE_KEYS.books,
-      JSON.stringify(books),
-    );
-
-    localStorage.setItem(
-      STORAGE_KEYS.records,
-      JSON.stringify(records),
-    );
-
-    localStorage.setItem(
-      STORAGE_KEYS.donations,
-      JSON.stringify(donations),
-    );
-
-    localStorage.setItem(
-      STORAGE_KEYS.assistants,
-      JSON.stringify(assistants),
-    );
-
+    localStorage.setItem(STORAGE_KEYS.books, JSON.stringify(books));
+    localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(records));
+    localStorage.setItem(STORAGE_KEYS.donations, JSON.stringify(donations));
+    localStorage.setItem(STORAGE_KEYS.assistants, JSON.stringify(assistants));
     localStorage.setItem(
       STORAGE_KEYS.notifications,
       JSON.stringify(notifications),
     );
-  }, [
-    books,
-    records,
-    donations,
-    assistants,
-    notifications,
-  ]);
+  }, [books, records, donations, assistants, notifications]);
 
   useEffect(() => {
     const token = localStorage.getItem(STORAGE_KEYS.jwtToken);
@@ -182,14 +170,11 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
         setCurrentUser(null);
         localStorage.removeItem(STORAGE_KEYS.currentUser);
       }
-
       return;
     }
 
     fetch('/api/verify', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     })
       .then(async (response) => {
         const data = (await response.json()) as AuthResponse;
@@ -205,6 +190,8 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
           'Authentication token could not be verified because the server is unavailable.',
         );
       });
+    // Restore the existing session at application startup.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const login = async (
@@ -215,24 +202,13 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
     try {
       const response = await fetch('/api/login', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          universityId,
-          role,
-          password,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ universityId, role, password }),
       });
 
       const data = (await response.json()) as AuthResponse;
 
-      if (
-        !response.ok ||
-        !data.success ||
-        !data.token ||
-        !data.user
-      ) {
+      if (!response.ok || !data.success || !data.token || !data.user) {
         return {
           success: false,
           error:
@@ -242,37 +218,27 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
       }
 
       setCurrentUser(data.user);
-
       localStorage.setItem(
         STORAGE_KEYS.currentUser,
         JSON.stringify(data.user),
       );
-
-      localStorage.setItem(
-        STORAGE_KEYS.jwtToken,
-        data.token,
-      );
-
-      return {
-        success: true,
-      };
+      localStorage.setItem(STORAGE_KEYS.jwtToken, data.token);
+      return { success: true };
     } catch {
       return {
         success: false,
-        error:
-          'The authentication server could not be reached. Please try again.',
+        error: 'The authentication server could not be reached. Please try again.',
       };
     }
   };
 
   const logout = () => {
     setCurrentUser(null);
-
     localStorage.removeItem(STORAGE_KEYS.currentUser);
     localStorage.removeItem(STORAGE_KEYS.jwtToken);
   };
 
-  const hasOutstandingFines = (studentId: string) =>
+  const hasOutstandingFines = (studentId: string): boolean =>
     records.some(
       (record) =>
         record.studentId === studentId &&
@@ -284,27 +250,20 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
     if (!currentUser || currentUser.role !== 'Student') {
       return {
         success: false,
-        message:
-          'Only authenticated students can request library books.',
+        message: 'Only authenticated students can request library books.',
       };
     }
 
-    const book = books.find(
-      (candidate) => candidate.id === bookId,
-    );
+    const book = books.find((candidate) => candidate.id === bookId);
 
     if (!book) {
-      return {
-        success: false,
-        message: 'The selected book could not be found.',
-      };
+      return { success: false, message: 'The selected book could not be found.' };
     }
 
     if (book.availableCopies <= 0) {
       return {
         success: false,
-        message:
-          'This book is currently unavailable for borrowing.',
+        message: 'This book is currently unavailable for borrowing.',
       };
     }
 
@@ -326,45 +285,35 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
     if (duplicateRecord) {
       return {
         success: false,
-        message:
-          'You already have an active request or loan for this book.',
+        message: 'You already have an active request or loan for this book.',
       };
     }
 
     const requestDate = new Date();
-    const requestDateString = toDateString(requestDate);
-    const dueDateString = toDateString(
-      addDays(requestDate, 14),
-    );
-
     const record: BorrowingRecord = {
-      id: `BR-${Date.now()}`,
+      id: `BR-${crypto.randomUUID()}`,
       studentId: currentUser.universityId,
       studentName: currentUser.name,
       bookId: book.id,
       bookTitle: book.title,
-      borrowDate: requestDateString,
-      dueDate: dueDateString,
+      borrowDate: toDateString(requestDate),
+      dueDate: toDateString(addDays(requestDate, 14)),
       status: 'Requested',
       fineAmount: 0,
       finePaid: false,
     };
 
     const notification: LibraryNotification = {
-      id: `NT-${Date.now()}`,
+      id: `NT-${crypto.randomUUID()}`,
       userId: currentUser.universityId,
       title: 'Borrow Request Submitted',
       text: `Your request for "${book.title}" has been submitted for librarian approval.`,
       type: 'Info',
-      date: requestDateString,
+      date: toDateString(requestDate),
       isRead: false,
     };
 
-    setRecords((currentRecords) => [
-      record,
-      ...currentRecords,
-    ]);
-
+    setRecords((currentRecords) => [record, ...currentRecords]);
     setNotifications((currentNotifications) => [
       notification,
       ...currentNotifications,
@@ -374,6 +323,91 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
       success: true,
       message:
         'Borrow request submitted successfully. A librarian must approve it before the book is issued.',
+    };
+  };
+
+  const submitDonation = (submission: DonationSubmission): ActionResult => {
+    if (!currentUser || currentUser.role !== 'Student') {
+      return {
+        success: false,
+        message: 'Only authenticated students can submit donation requests.',
+      };
+    }
+
+    const bookTitle = submission.bookTitle.trim();
+    const author = submission.author.trim();
+    const isbn = submission.isbn.replace(/[\s-]/g, '').toUpperCase();
+
+    if (!bookTitle || !author || !isbn) {
+      return {
+        success: false,
+        message: 'Book title, author and ISBN are required.',
+      };
+    }
+
+    if (!/^(?:\d{10}|\d{13}|\d{9}X)$/.test(isbn)) {
+      return {
+        success: false,
+        message: 'Enter a valid ISBN-10 or ISBN-13 format.',
+      };
+    }
+
+    if (!SUPPORTED_GENRES.includes(submission.genre)) {
+      return { success: false, message: 'Please select a supported genre.' };
+    }
+
+    if (submission.donationType !== 'Permanent' &&
+        submission.donationType !== 'Temporary') {
+      return { success: false, message: 'Please select a donation type.' };
+    }
+
+    if (
+      submission.donationType === 'Temporary' &&
+      (!Number.isInteger(submission.durationMonths) ||
+        (submission.durationMonths ?? 0) < 1)
+    ) {
+      return {
+        success: false,
+        message: 'Temporary donations require a positive whole-number duration.',
+      };
+    }
+
+    const today = new Date();
+    const donation: Donation = {
+      id: `DON-${crypto.randomUUID()}`,
+      donorId: currentUser.universityId,
+      donorName: currentUser.name,
+      bookTitle,
+      author,
+      isbn,
+      genre: submission.genre,
+      donationType: submission.donationType,
+      ...(submission.donationType === 'Temporary'
+        ? { durationMonths: submission.durationMonths }
+        : {}),
+      status: 'Pending',
+      requestedAt: today.toISOString(),
+    };
+
+    const notification: LibraryNotification = {
+      id: `NT-${crypto.randomUUID()}`,
+      userId: currentUser.universityId,
+      title: 'Donation Request Submitted',
+      text: `Your donation request for "${bookTitle}" is awaiting manager review.`,
+      type: 'Info',
+      date: toDateString(today),
+      isRead: false,
+    };
+
+    setDonations((currentDonations) => [donation, ...currentDonations]);
+    setNotifications((currentNotifications) => [
+      notification,
+      ...currentNotifications,
+    ]);
+
+    return {
+      success: true,
+      message: `Your donation request for "${bookTitle}" was submitted for review.`,
     };
   };
 
@@ -387,6 +421,7 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
     login,
     logout,
     requestBorrow,
+    submitDonation,
   };
 
   return (
@@ -396,13 +431,11 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
   );
 }
 
-export function useLibrary() {
+export function useLibrary(): LibraryContextValue {
   const context = useContext(LibraryContext);
 
   if (!context) {
-    throw new Error(
-      'useLibrary must be used within a LibraryProvider.',
-    );
+    throw new Error('useLibrary must be used within a LibraryProvider.');
   }
 
   return context;
