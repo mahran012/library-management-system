@@ -66,6 +66,7 @@ interface LibraryContextValue {
     bookId: string,
   ) => ActionResult;
   returnBook: (recordId: string) => ActionResult;
+  settleFine: (recordId: string) => ActionResult;
 }
 interface LibraryProviderProps {
   children: ReactNode;
@@ -667,6 +668,78 @@ const returnBook = (recordId: string): ActionResult => {
   };
 };
 
+
+const settleFine = (recordId: string): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Librarian') {
+    return {
+      success: false,
+      message: 'Only authenticated librarians can record fine settlements.',
+    };
+  }
+
+  const record = records.find((candidate) => candidate.id === recordId);
+
+  if (!record) {
+    return {
+      success: false,
+      message: 'The borrowing record could not be found.',
+    };
+  }
+
+  if (record.status !== 'Returned') {
+    return {
+      success: false,
+      message: 'A fine can only be settled after the book has been returned.',
+    };
+  }
+
+  if (record.fineAmount <= 0) {
+    return {
+      success: false,
+      message: 'This borrowing record does not have an outstanding fine.',
+    };
+  }
+
+  if (record.finePaid) {
+    return {
+      success: false,
+      message: 'This fine has already been settled.',
+    };
+  }
+
+  setRecords((currentRecords) =>
+    currentRecords.map((candidate) =>
+      candidate.id === recordId
+        ? {
+            ...candidate,
+            finePaid: true,
+          }
+        : candidate,
+    ),
+  );
+
+  const settlementDate = toDateString(new Date());
+  const notification: LibraryNotification = {
+    id: `NT-${crypto.randomUUID()}`,
+    userId: record.studentId,
+    title: 'Fine Settled',
+    text: `Your $${record.fineAmount.toFixed(2)} overdue fine for \"${record.bookTitle}\" was recorded as paid.`,
+    type: 'Success',
+    date: settlementDate,
+    isRead: false,
+  };
+
+  setNotifications((currentNotifications) => [
+    notification,
+    ...currentNotifications,
+  ]);
+
+  return {
+    success: true,
+    message: `$${record.fineAmount.toFixed(2)} fine for \"${record.bookTitle}\" was recorded as paid for ${record.studentName}.`,
+  };
+};
+
 const value: LibraryContextValue = {
     books,
     records,
@@ -681,6 +754,7 @@ const value: LibraryContextValue = {
     confirmBorrowRequest,
     issueBook,
     returnBook,
+    settleFine,
   };
 return (
     <LibraryContext.Provider value={value}>

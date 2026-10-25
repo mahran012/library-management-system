@@ -12,6 +12,8 @@ import {
   UserRound,
   RotateCcw,
   AlertTriangle,
+  CircleDollarSign,
+  BadgeCheck,
 } from 'lucide-react';
 
 import { useLibrary } from '../context/LibraryContext';
@@ -59,6 +61,7 @@ export function LibrarianDashboard() {
     confirmBorrowRequest,
     issueBook,
     returnBook,
+    settleFine,
   } = useLibrary();
 
   const [feedback, setFeedback] =
@@ -94,6 +97,24 @@ export function LibrarianDashboard() {
   );
 
   const activeLoans = activeLoanRecords.length;
+
+  const outstandingFineRecords = useMemo(
+    () =>
+      records
+        .filter(
+          (record) =>
+            record.status === 'Returned' &&
+            record.fineAmount > 0 &&
+            !record.finePaid,
+        )
+        .sort((a, b) => b.fineAmount - a.fineAmount),
+    [records],
+  );
+
+  const outstandingFineTotal = outstandingFineRecords.reduce(
+    (total, record) => total + record.fineAmount,
+    0,
+  );
 
   const availableBooks = useMemo(
     () =>
@@ -148,9 +169,19 @@ export function LibrarianDashboard() {
     });
   };
 
+
+  const handleFineSettlement = (recordId: string) => {
+    const result = settleFine(recordId);
+
+    setFeedback({
+      type: result.success ? 'success' : 'error',
+      message: result.message,
+    });
+  };
+
   return (
     <section>
-      <div className="mb-6 grid gap-4 sm:grid-cols-2">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-5">
           <div className="flex items-center justify-between">
             <p className="text-sm text-slate-500">
@@ -182,6 +213,27 @@ export function LibrarianDashboard() {
 
           <p className="mt-3 text-3xl font-bold">
             {activeLoans}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-5">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-500">
+              Outstanding fines
+            </p>
+
+            <CircleDollarSign
+              size={20}
+              className="text-red-600"
+            />
+          </div>
+
+          <p className="mt-3 text-3xl font-bold">
+            ${outstandingFineTotal.toFixed(2)}
+          </p>
+
+          <p className="mt-1 text-xs text-slate-500">
+            {outstandingFineRecords.length} unpaid record{outstandingFineRecords.length === 1 ? '' : 's'}
           </p>
         </div>
       </div>
@@ -384,6 +436,75 @@ export function LibrarianDashboard() {
               </article>
             );
           })}
+        </div>
+      )}
+
+      <div className="mb-5 mt-10">
+        <h3 className="text-xl font-bold">
+          Outstanding fine settlements
+        </h3>
+
+        <p className="mt-1 text-sm text-slate-600">
+          Record payments for overdue fines after returned books have been processed.
+        </p>
+      </div>
+
+      {outstandingFineRecords.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+          <BadgeCheck
+            size={38}
+            className="mx-auto text-slate-400"
+          />
+
+          <h4 className="mt-4 text-lg font-semibold">
+            No outstanding fines
+          </h4>
+
+          <p className="mt-2 text-sm text-slate-600">
+            Unpaid overdue fines will appear here after returned books are processed.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {outstandingFineRecords.map((record) => (
+            <article
+              key={record.id}
+              className="rounded-xl border border-slate-200 bg-white p-6"
+            >
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                    <UserRound size={16} />
+                    <span>{record.studentName}</span>
+                    <span>·</span>
+                    <span className="font-mono">
+                      {record.studentId}
+                    </span>
+                  </div>
+
+                  <h4 className="mt-3 text-xl font-bold">
+                    {record.bookTitle}
+                  </h4>
+
+                  <p className="mt-2 text-sm text-slate-600">
+                    Returned {record.returnDate ? formatDate(record.returnDate) : '—'}
+                  </p>
+
+                  <p className="mt-2 text-lg font-bold text-red-700">
+                    ${record.fineAmount.toFixed(2)} outstanding
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleFineSettlement(record.id)}
+                  className="rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700"
+                >
+                  Record fine payment
+                </button>
+              </div>
+            </article>
+          ))}
         </div>
       )}
 
