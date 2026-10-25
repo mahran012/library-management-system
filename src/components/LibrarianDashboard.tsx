@@ -1,10 +1,17 @@
-import { useMemo, useState } from 'react';
+import {
+  useMemo,
+  useState,
+  type FormEvent,
+} from 'react';
 
 import {
   BookCheck,
   BookOpen,
+  BookPlus,
   Clock3,
   UserRound,
+  RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
 
 import { useLibrary } from '../context/LibraryContext';
@@ -28,24 +35,48 @@ function formatDate(value: string): string {
   }).format(date);
 }
 
+function getLateDays(dueDate: string): number {
+  const today = new Date();
+  const todayDate = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  );
+  const due = new Date(`${dueDate}T00:00:00`);
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+
+  return Math.max(
+    0,
+    Math.ceil((todayDate.getTime() - due.getTime()) / millisecondsPerDay),
+  );
+}
+
 export function LibrarianDashboard() {
   const {
     books,
     records,
     currentUser,
     confirmBorrowRequest,
+    issueBook,
+    returnBook,
   } = useLibrary();
 
   const [feedback, setFeedback] =
     useState<Feedback | null>(null);
 
+  const [issueStudentId, setIssueStudentId] =
+    useState('');
+
+  const [issueStudentName, setIssueStudentName] =
+    useState('');
+
+  const [issueBookId, setIssueBookId] =
+    useState('');
+
   const pendingRequests = useMemo(
     () =>
       records
-        .filter(
-          (record) =>
-            record.status === 'Requested',
-        )
+        .filter((record) => record.status === 'Requested')
         .sort(
           (a, b) =>
             new Date(b.borrowDate).getTime() -
@@ -54,32 +85,65 @@ export function LibrarianDashboard() {
     [records],
   );
 
-  const activeLoans = useMemo(
+  const activeLoanRecords = useMemo(
     () =>
-      records.filter(
-        (record) =>
-          record.status === 'Borrowed',
-      ).length,
+      records
+        .filter((record) => record.status === 'Borrowed')
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate)),
     [records],
   );
 
-  if (
-    !currentUser ||
-    currentUser.role !== 'Librarian'
-  ) {
+  const activeLoans = activeLoanRecords.length;
+
+  const availableBooks = useMemo(
+    () =>
+      books
+        .filter((book) => book.availableCopies > 0)
+        .sort((a, b) => a.title.localeCompare(b.title)),
+    [books],
+  );
+
+  if (!currentUser || currentUser.role !== 'Librarian') {
     return null;
   }
 
-  const handleApprove = (
-    recordId: string,
-  ) => {
-    const result =
-      confirmBorrowRequest(recordId);
+  const handleApprove = (recordId: string) => {
+    const result = confirmBorrowRequest(recordId);
 
     setFeedback({
-      type: result.success
-        ? 'success'
-        : 'error',
+      type: result.success ? 'success' : 'error',
+      message: result.message,
+    });
+  };
+
+  const handleDirectIssue = (
+    event: FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+
+    const result = issueBook(
+      issueStudentId,
+      issueStudentName,
+      issueBookId,
+    );
+
+    setFeedback({
+      type: result.success ? 'success' : 'error',
+      message: result.message,
+    });
+
+    if (result.success) {
+      setIssueStudentId('');
+      setIssueStudentName('');
+      setIssueBookId('');
+    }
+  };
+
+  const handleReturn = (recordId: string) => {
+    const result = returnBook(recordId);
+
+    setFeedback({
+      type: result.success ? 'success' : 'error',
       message: result.message,
     });
   };
@@ -135,14 +199,201 @@ export function LibrarianDashboard() {
         </div>
       )}
 
+      <div className="mb-8 rounded-xl border border-slate-200 bg-white p-6">
+        <div className="mb-5 flex items-center gap-3">
+          <BookPlus
+            size={22}
+            className="text-slate-700"
+          />
+
+          <div>
+            <h3 className="text-lg font-bold">
+              Direct book issue
+            </h3>
+
+            <p className="mt-1 text-sm text-slate-600">
+              Issue an available book directly to a Student.
+            </p>
+          </div>
+        </div>
+
+        <form
+          onSubmit={handleDirectIssue}
+          className="grid gap-4 lg:grid-cols-2"
+        >
+          <div>
+            <label
+              htmlFor="issue-student-id"
+              className="mb-2 block text-sm font-semibold"
+            >
+              Student ID
+            </label>
+
+            <input
+              id="issue-student-id"
+              value={issueStudentId}
+              onChange={(event) =>
+                setIssueStudentId(event.target.value)
+              }
+              placeholder="U2023101"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-slate-900"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="issue-student-name"
+              className="mb-2 block text-sm font-semibold"
+            >
+              Student name
+            </label>
+
+            <input
+              id="issue-student-name"
+              value={issueStudentName}
+              onChange={(event) =>
+                setIssueStudentName(event.target.value)
+              }
+              placeholder="Alex Mercer"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-slate-900"
+            />
+          </div>
+
+          <div className="lg:col-span-2">
+            <label
+              htmlFor="issue-book"
+              className="mb-2 block text-sm font-semibold"
+            >
+              Available book
+            </label>
+
+            <select
+              id="issue-book"
+              value={issueBookId}
+              onChange={(event) =>
+                setIssueBookId(event.target.value)
+              }
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 outline-none focus:border-slate-900"
+            >
+              <option value="">
+                Select a book
+              </option>
+
+              {availableBooks.map((book) => (
+                <option
+                  key={book.id}
+                  value={book.id}
+                >
+                  {book.title} — {book.availableCopies} available
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="lg:col-span-2">
+            <button
+              type="submit"
+              disabled={!issueBookId}
+              className="rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Issue book
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div className="mb-5 mt-10">
+        <h3 className="text-xl font-bold">
+          Active loans and returns
+        </h3>
+
+        <p className="mt-1 text-sm text-slate-600">
+          Process returned books and record overdue fines automatically.
+        </p>
+      </div>
+
+      {activeLoanRecords.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+          <RotateCcw
+            size={38}
+            className="mx-auto text-slate-400"
+          />
+
+          <h4 className="mt-4 text-lg font-semibold">
+            No active loans
+          </h4>
+
+          <p className="mt-2 text-sm text-slate-600">
+            Borrowed books that can be returned will appear here.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {activeLoanRecords.map((record) => {
+            const lateDays = getLateDays(record.dueDate);
+            const overdue = lateDays > 0;
+
+            return (
+              <article
+                key={record.id}
+                className="rounded-xl border border-slate-200 bg-white p-6"
+              >
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                      <UserRound size={16} />
+                      <span>{record.studentName}</span>
+                      <span>·</span>
+                      <span className="font-mono">
+                        {record.studentId}
+                      </span>
+                    </div>
+
+                    <h4 className="mt-3 text-xl font-bold">
+                      {record.bookTitle}
+                    </h4>
+
+                    <p className="mt-2 text-sm text-slate-600">
+                      Borrowed on {formatDate(record.borrowDate)}
+                    </p>
+
+                    <p
+                      className={`mt-2 text-sm font-semibold ${
+                        overdue ? 'text-red-700' : 'text-green-700'
+                      }`}
+                    >
+                      Due {formatDate(record.dueDate)}
+                    </p>
+
+                    {overdue && (
+                      <p className="mt-2 flex items-center gap-2 text-sm font-semibold text-red-700">
+                        <AlertTriangle size={16} />
+                        {lateDays} overdue day{lateDays === 1 ? '' : 's'} · expected fine ${lateDays.toFixed(2)}
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleReturn(record.id)}
+                    className="rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700"
+                  >
+                    Process return
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
       <div className="mb-5">
         <h3 className="text-xl font-bold">
           Pending borrowing requests
         </h3>
 
         <p className="mt-1 text-sm text-slate-600">
-          Review Student requests before
-          issuing library inventory.
+          Review Student requests before issuing library inventory.
         </p>
       </div>
 
@@ -158,91 +409,71 @@ export function LibrarianDashboard() {
           </h4>
 
           <p className="mt-2 text-sm text-slate-600">
-            New Student borrowing requests
-            will appear here.
+            New Student borrowing requests will appear here.
           </p>
         </div>
       ) : (
         <div className="space-y-4">
-          {pendingRequests.map(
-            (record) => {
-              const book = books.find(
-                (candidate) =>
-                  candidate.id ===
-                  record.bookId,
-              );
+          {pendingRequests.map((record) => {
+            const book = books.find(
+              (candidate) => candidate.id === record.bookId,
+            );
 
-              const availableCopies =
-                book?.availableCopies ?? 0;
+            const availableCopies = book?.availableCopies ?? 0;
 
-              return (
-                <article
-                  key={record.id}
-                  className="rounded-xl border border-slate-200 bg-white p-6"
-                >
-                  <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
-                        <UserRound size={16} />
+            return (
+              <article
+                key={record.id}
+                className="rounded-xl border border-slate-200 bg-white p-6"
+              >
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                      <UserRound size={16} />
 
-                        <span>
-                          {record.studentName}
-                        </span>
+                      <span>{record.studentName}</span>
+                      <span>·</span>
 
-                        <span>·</span>
-
-                        <span className="font-mono">
-                          {record.studentId}
-                        </span>
-                      </div>
-
-                      <h4 className="mt-3 text-xl font-bold">
-                        {record.bookTitle}
-                      </h4>
-
-                      <p className="mt-2 text-sm text-slate-600">
-                        Requested on{' '}
-                        {formatDate(
-                          record.borrowDate,
-                        )}
-                      </p>
-
-                      <p
-                        className={`mt-2 text-sm font-semibold ${
-                          availableCopies > 0
-                            ? 'text-green-700'
-                            : 'text-red-700'
-                        }`}
-                      >
-                        {availableCopies}{' '}
-                        {availableCopies === 1
-                          ? 'copy'
-                          : 'copies'}{' '}
-                        currently available
-                      </p>
+                      <span className="font-mono">
+                        {record.studentId}
+                      </span>
                     </div>
 
-                    <button
-                      type="button"
-                      disabled={
-                        availableCopies <= 0
-                      }
-                      onClick={() =>
-                        handleApprove(
-                          record.id,
-                        )
-                      }
-                      className="rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600"
+                    <h4 className="mt-3 text-xl font-bold">
+                      {record.bookTitle}
+                    </h4>
+
+                    <p className="mt-2 text-sm text-slate-600">
+                      Requested on {formatDate(record.borrowDate)}
+                    </p>
+
+                    <p
+                      className={`mt-2 text-sm font-semibold ${
+                        availableCopies > 0
+                          ? 'text-green-700'
+                          : 'text-red-700'
+                      }`}
                     >
-                      {availableCopies > 0
-                        ? 'Approve and issue'
-                        : 'No copies available'}
-                    </button>
+                      {availableCopies}{' '}
+                      {availableCopies === 1 ? 'copy' : 'copies'}{' '}
+                      currently available
+                    </p>
                   </div>
-                </article>
-              );
-            },
-          )}
+
+                  <button
+                    type="button"
+                    disabled={availableCopies <= 0}
+                    onClick={() => handleApprove(record.id)}
+                    className="rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600"
+                  >
+                    {availableCopies > 0
+                      ? 'Approve and issue'
+                      : 'No copies available'}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
         </div>
       )}
     </section>
