@@ -60,6 +60,12 @@ interface LibraryContextValue {
   requestBorrow: (bookId: string) => ActionResult;
   submitDonation: (submission: DonationSubmission) => ActionResult;
   confirmBorrowRequest: (recordId: string) => ActionResult;
+  issueBook: (
+    studentId: string,
+    studentName: string,
+    bookId: string,
+  ) => ActionResult;
+  returnBook: (recordId: string) => ActionResult;
 }
 interface LibraryProviderProps {
   children: ReactNode;
@@ -446,6 +452,221 @@ const confirmBorrowRequest = (recordId: string): ActionResult => {
   };
 };
 
+
+const issueBook = (
+  studentId: string,
+  studentName: string,
+  bookId: string,
+): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Librarian') {
+    return {
+      success: false,
+      message: 'Only authenticated librarians can issue library books.',
+    };
+  }
+
+  const normalizedStudentId = studentId.trim();
+  const normalizedStudentName = studentName.trim();
+
+  if (!normalizedStudentId || !normalizedStudentName) {
+    return {
+      success: false,
+      message: 'Student ID and Student name are required.',
+    };
+  }
+
+  const book = books.find((candidate) => candidate.id === bookId);
+
+  if (!book) {
+    return {
+      success: false,
+      message: 'The selected book could not be found.',
+    };
+  }
+
+  if (book.availableCopies <= 0) {
+    return {
+      success: false,
+      message: 'The selected book has no available copies.',
+    };
+  }
+
+  if (hasOutstandingFines(normalizedStudentId)) {
+    return {
+      success: false,
+      message:
+        'This Student has outstanding unpaid fines and cannot receive another book.',
+    };
+  }
+
+  const duplicateLoan = records.some(
+    (record) =>
+      record.studentId === normalizedStudentId &&
+      record.bookId === book.id &&
+      record.status !== 'Returned',
+  );
+
+  if (duplicateLoan) {
+    return {
+      success: false,
+      message:
+        'This Student already has an active request or loan for this book.',
+    };
+  }
+
+  const issueDate = new Date();
+  const borrowDate = toDateString(issueDate);
+  const dueDate = toDateString(addDays(issueDate, 14));
+
+  const record: BorrowingRecord = {
+    id: `BR-${crypto.randomUUID()}`,
+    studentId: normalizedStudentId,
+    studentName: normalizedStudentName,
+    bookId: book.id,
+    bookTitle: book.title,
+    borrowDate,
+    dueDate,
+    status: 'Borrowed',
+    fineAmount: 0,
+    finePaid: false,
+  };
+
+  setRecords((currentRecords) => [record, ...currentRecords]);
+
+  setBooks((currentBooks) =>
+    currentBooks.map((candidate) =>
+      candidate.id === book.id
+        ? {
+            ...candidate,
+            availableCopies: candidate.availableCopies - 1,
+          }
+        : candidate,
+    ),
+  );
+
+  const notification: LibraryNotification = {
+    id: `NT-${crypto.randomUUID()}`,
+    userId: normalizedStudentId,
+    title: 'Book Issued',
+    text: `"${book.title}" was issued to you and is due on ${dueDate}.`,
+    type: 'Success',
+    date: borrowDate,
+    isRead: false,
+  };
+
+  setNotifications((currentNotifications) => [
+    notification,
+    ...currentNotifications,
+  ]);
+
+  return {
+    success: true,
+    message: `"${book.title}" was issued to ${normalizedStudentName}.`,
+  };
+};
+
+const returnBook = (recordId: string): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Librarian') {
+    return {
+      success: false,
+      message: 'Only authenticated librarians can process book returns.',
+    };
+  }
+
+  const record = records.find((candidate) => candidate.id === recordId);
+
+  if (!record) {
+    return {
+      success: false,
+      message: 'The borrowing record could not be found.',
+    };
+  }
+
+  if (record.status !== 'Borrowed') {
+    return {
+      success: false,
+      message: 'Only active Borrowed records can be returned.',
+    };
+  }
+
+  const book = books.find((candidate) => candidate.id === record.bookId);
+
+  if (!book) {
+    return {
+      success: false,
+      message: 'The borrowed book could not be found in the catalogue.',
+    };
+  }
+
+  const returnDateValue = new Date();
+  const returnDate = toDateString(returnDateValue);
+  const dueDateValue = new Date(`${record.dueDate}T00:00:00`);
+  const currentDateValue = new Date(`${returnDate}T00:00:00`);
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+  const lateDays = Math.max(
+    0,
+    Math.ceil(
+      (currentDateValue.getTime() - dueDateValue.getTime()) /
+        millisecondsPerDay,
+    ),
+  );
+  const fineAmount = lateDays;
+
+  setRecords((currentRecords) =>
+    currentRecords.map((candidate) =>
+      candidate.id === recordId
+        ? {
+            ...candidate,
+            status: 'Returned',
+            returnDate,
+            fineAmount,
+            finePaid: false,
+          }
+        : candidate,
+    ),
+  );
+
+  setBooks((currentBooks) =>
+    currentBooks.map((candidate) =>
+      candidate.id === book.id
+        ? {
+            ...candidate,
+            availableCopies: Math.min(
+              candidate.totalCopies,
+              candidate.availableCopies + 1,
+            ),
+          }
+        : candidate,
+    ),
+  );
+
+  const notification: LibraryNotification = {
+    id: `NT-${crypto.randomUUID()}`,
+    userId: record.studentId,
+    title: 'Book Returned',
+    text:
+      fineAmount > 0
+        ? `\"${record.bookTitle}\" was returned ${lateDays} day${lateDays === 1 ? '' : 's'} late. An overdue fine of $${fineAmount.toFixed(2)} was recorded.`
+        : `\"${record.bookTitle}\" was returned successfully with no overdue fine.`,
+    type: fineAmount > 0 ? 'Alert' : 'Success',
+    date: returnDate,
+    isRead: false,
+  };
+
+  setNotifications((currentNotifications) => [
+    notification,
+    ...currentNotifications,
+  ]);
+
+  return {
+    success: true,
+    message:
+      fineAmount > 0
+        ? `\"${record.bookTitle}\" was returned. ${lateDays} overdue day${lateDays === 1 ? '' : 's'} produced a $${fineAmount.toFixed(2)} fine.`
+        : `\"${record.bookTitle}\" was returned successfully with no overdue fine.`,
+  };
+};
+
 const value: LibraryContextValue = {
     books,
     records,
@@ -458,6 +679,8 @@ const value: LibraryContextValue = {
     requestBorrow,
     submitDonation,
     confirmBorrowRequest,
+    issueBook,
+    returnBook,
   };
 return (
     <LibraryContext.Provider value={value}>
