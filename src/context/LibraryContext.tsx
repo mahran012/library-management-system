@@ -44,6 +44,17 @@ export interface DonationSubmission {
   donationType: DonationType;
   durationMonths?: number;
 }
+
+export interface BookSubmission {
+  title: string;
+  author: string;
+  isbn: string;
+  genre: Genre;
+  description: string;
+  imageUrl: string;
+  shelfLocation: string;
+  totalCopies: number;
+}
 interface LibraryContextValue {
   books: Book[];
   records: BorrowingRecord[];
@@ -67,6 +78,9 @@ interface LibraryContextValue {
   ) => ActionResult;
   returnBook: (recordId: string) => ActionResult;
   settleFine: (recordId: string) => ActionResult;
+  addBook: (submission: BookSubmission) => ActionResult;
+  updateBook: (bookId: string, submission: BookSubmission) => ActionResult;
+  deleteBook: (bookId: string) => ActionResult;
 }
 interface LibraryProviderProps {
   children: ReactNode;
@@ -740,6 +754,212 @@ const settleFine = (recordId: string): ActionResult => {
   };
 };
 
+const normalizeIsbn = (value: string): string =>
+  value.replace(/[\s-]/g, '').toUpperCase();
+
+const validateBookSubmission = (
+  submission: BookSubmission,
+  excludedBookId?: string,
+): ActionResult => {
+  const title = submission.title.trim();
+  const author = submission.author.trim();
+  const isbn = normalizeIsbn(submission.isbn);
+  const shelfLocation = submission.shelfLocation.trim();
+
+  if (!title || !author || !isbn || !shelfLocation) {
+    return {
+      success: false,
+      message: 'Title, author, ISBN and shelf location are required.',
+    };
+  }
+
+  if (!/^(?:\d{10}|\d{13}|\d{9}X)$/.test(isbn)) {
+    return {
+      success: false,
+      message: 'Enter a valid ISBN-10 or ISBN-13 format.',
+    };
+  }
+
+  if (!SUPPORTED_GENRES.includes(submission.genre)) {
+    return {
+      success: false,
+      message: 'Please select a supported genre.',
+    };
+  }
+
+  if (!Number.isInteger(submission.totalCopies) || submission.totalCopies < 1) {
+    return {
+      success: false,
+      message: 'Total copies must be a positive whole number.',
+    };
+  }
+
+  const duplicateIsbn = books.some(
+    (book) =>
+      book.id !== excludedBookId && normalizeIsbn(book.isbn) === isbn,
+  );
+
+  if (duplicateIsbn) {
+    return {
+      success: false,
+      message: 'A catalogue book with this ISBN already exists.',
+    };
+  }
+
+  return { success: true, message: 'Book data is valid.' };
+};
+
+const addBook = (submission: BookSubmission): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can add catalogue books.',
+    };
+  }
+
+  const validation = validateBookSubmission(submission);
+  if (!validation.success) {
+    return validation;
+  }
+
+  const book: Book = {
+    id: `BK-${crypto.randomUUID()}`,
+    title: submission.title.trim(),
+    author: submission.author.trim(),
+    isbn: normalizeIsbn(submission.isbn),
+    genre: submission.genre,
+    description:
+      submission.description.trim() ||
+      'University library catalogue resource.',
+    imageUrl:
+      submission.imageUrl.trim() ||
+      'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?auto=format&fit=crop&q=80&w=400',
+    shelfLocation: submission.shelfLocation.trim().toUpperCase(),
+    totalCopies: submission.totalCopies,
+    availableCopies: submission.totalCopies,
+  };
+
+  setBooks((currentBooks) => [book, ...currentBooks]);
+
+  return {
+    success: true,
+    message: `\"${book.title}\" was added to the catalogue.`,
+  };
+};
+
+const updateBook = (
+  bookId: string,
+  submission: BookSubmission,
+): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can edit catalogue books.',
+    };
+  }
+
+  const existingBook = books.find((book) => book.id === bookId);
+
+  if (!existingBook) {
+    return {
+      success: false,
+      message: 'The catalogue book could not be found.',
+    };
+  }
+
+  const validation = validateBookSubmission(submission, bookId);
+  if (!validation.success) {
+    return validation;
+  }
+
+  const borrowedCopies =
+    existingBook.totalCopies - existingBook.availableCopies;
+
+  if (submission.totalCopies < borrowedCopies) {
+    return {
+      success: false,
+      message: `Total copies cannot be lower than the ${borrowedCopies} currently issued ${borrowedCopies === 1 ? 'copy' : 'copies'}.`,
+    };
+  }
+
+  const normalizedTitle = submission.title.trim();
+
+  setBooks((currentBooks) =>
+    currentBooks.map((book) =>
+      book.id === bookId
+        ? {
+            ...book,
+            title: normalizedTitle,
+            author: submission.author.trim(),
+            isbn: normalizeIsbn(submission.isbn),
+            genre: submission.genre,
+            description:
+              submission.description.trim() ||
+              'University library catalogue resource.',
+            imageUrl:
+              submission.imageUrl.trim() ||
+              'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?auto=format&fit=crop&q=80&w=400',
+            shelfLocation: submission.shelfLocation.trim().toUpperCase(),
+            totalCopies: submission.totalCopies,
+            availableCopies: submission.totalCopies - borrowedCopies,
+          }
+        : book,
+    ),
+  );
+
+  setRecords((currentRecords) =>
+    currentRecords.map((record) =>
+      record.bookId === bookId && record.status !== 'Returned'
+        ? { ...record, bookTitle: normalizedTitle }
+        : record,
+    ),
+  );
+
+  return {
+    success: true,
+    message: `\"${normalizedTitle}\" was updated successfully.`,
+  };
+};
+
+const deleteBook = (bookId: string): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can delete catalogue books.',
+    };
+  }
+
+  const book = books.find((candidate) => candidate.id === bookId);
+
+  if (!book) {
+    return {
+      success: false,
+      message: 'The catalogue book could not be found.',
+    };
+  }
+
+  const hasActiveReference = records.some(
+    (record) => record.bookId === bookId && record.status !== 'Returned',
+  );
+
+  if (hasActiveReference) {
+    return {
+      success: false,
+      message:
+        'This book cannot be deleted while it has a pending request or active loan.',
+    };
+  }
+
+  setBooks((currentBooks) =>
+    currentBooks.filter((candidate) => candidate.id !== bookId),
+  );
+
+  return {
+    success: true,
+    message: `\"${book.title}\" was removed from the catalogue.`,
+  };
+};
+
 const value: LibraryContextValue = {
     books,
     records,
@@ -755,6 +975,9 @@ const value: LibraryContextValue = {
     issueBook,
     returnBook,
     settleFine,
+    addBook,
+    updateBook,
+    deleteBook,
   };
 return (
     <LibraryContext.Provider value={value}>
