@@ -83,6 +83,7 @@ interface LibraryContextValue {
   deleteBook: (bookId: string) => ActionResult;
   approveDonation: (donationId: string, shelfLocation: string) => ActionResult;
   rejectDonation: (donationId: string, reason: string) => ActionResult;
+  addAssistant: (name: string, email: string) => ActionResult;
 }
 interface LibraryProviderProps {
   children: ReactNode;
@@ -142,7 +143,7 @@ const [records, setRecords] = useState<BorrowingRecord[]>(() =>
 const [donations, setDonations] = useState<Donation[]>(() =>
     loadFromStorage(STORAGE_KEYS.donations, INITIAL_DONATIONS),
   );
-const [assistants] = useState<AssistantAccount[]>(() =>
+const [assistants, setAssistants] = useState<AssistantAccount[]>(() =>
     loadFromStorage(STORAGE_KEYS.assistants, INITIAL_ASSISTANTS),
   );
 const [notifications, setNotifications] =
@@ -1146,6 +1147,69 @@ const rejectDonation = (
   };
 };
 
+
+const addAssistant = (name: string, email: string): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can create Assistant Librarian accounts.',
+    };
+  }
+
+  const normalizedName = name.trim();
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!normalizedName || !normalizedEmail) {
+    return {
+      success: false,
+      message: 'Assistant name and university email are required.',
+    };
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return {
+      success: false,
+      message: 'Enter a valid Assistant email address.',
+    };
+  }
+
+  const duplicateEmail = assistants.some(
+    (assistant) => assistant.email.toLowerCase() === normalizedEmail,
+  );
+
+  if (duplicateEmail) {
+    return {
+      success: false,
+      message: 'An Assistant account already uses this email address.',
+    };
+  }
+
+  const nextAssistantNumber =
+    assistants.reduce((highestNumber, assistant) => {
+      const match = /^AST(\d+)$/i.exec(assistant.id);
+
+      if (!match) {
+        return highestNumber;
+      }
+
+      return Math.max(highestNumber, Number(match[1]));
+    }, 0) + 1;
+
+  const assistant: AssistantAccount = {
+    id: `AST${String(nextAssistantNumber).padStart(3, '0')}`,
+    name: normalizedName,
+    email: normalizedEmail,
+    createdAt: toDateString(new Date()),
+  };
+
+  setAssistants((currentAssistants) => [assistant, ...currentAssistants]);
+
+  return {
+    success: true,
+    message: `Assistant account ${assistant.id} was created for ${assistant.name}.`,
+  };
+};
+
 const value: LibraryContextValue = {
     books,
     records,
@@ -1166,6 +1230,7 @@ const value: LibraryContextValue = {
     deleteBook,
     approveDonation,
     rejectDonation,
+    addAssistant,
   };
 return (
     <LibraryContext.Provider value={value}>

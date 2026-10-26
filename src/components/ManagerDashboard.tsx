@@ -5,6 +5,8 @@ import {
   Edit3,
   Gift,
   LibraryBig,
+  UserPlus,
+  UsersRound,
   PackageCheck,
   Plus,
   Search,
@@ -50,12 +52,14 @@ export function ManagerDashboard() {
   const {
     books,
     donations,
+    assistants,
     currentUser,
     addBook,
     updateBook,
     deleteBook,
     approveDonation,
     rejectDonation,
+    addAssistant,
   } = useLibrary();
 
   const [query, setQuery] = useState('');
@@ -65,6 +69,8 @@ export function ManagerDashboard() {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [donationShelf, setDonationShelf] = useState<Record<string, string>>({});
   const [rejectionReason, setRejectionReason] = useState<Record<string, string>>({});
+  const [assistantName, setAssistantName] = useState('');
+  const [assistantEmail, setAssistantEmail] = useState('');
 
   const filteredBooks = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -223,6 +229,23 @@ export function ManagerDashboard() {
     }
   };
 
+
+  const handleAddAssistant = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const result = addAssistant(assistantName, assistantEmail);
+
+    setFeedback({
+      type: result.success ? 'success' : 'error',
+      message: result.message,
+    });
+
+    if (result.success) {
+      setAssistantName('');
+      setAssistantEmail('');
+    }
+  };
+
   const formFields = (
     values: BookSubmission,
     updateField: <K extends keyof BookSubmission>(
@@ -377,6 +400,111 @@ export function ManagerDashboard() {
           {feedback.message}
         </div>
       )}
+
+
+      <div className="rounded-xl border border-slate-200 bg-white p-6">
+        <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-3">
+            <UsersRound size={24} className="mt-0.5 text-indigo-700" />
+            <div>
+              <h3 className="text-xl font-bold">Assistant Librarian accounts</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Create staff IDs for Librarians who operate circulation, returns and fine settlement.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
+            {assistants.length} active account{assistants.length === 1 ? '' : 's'}
+          </div>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[620px] text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Staff ID</th>
+                    <th className="px-4 py-3">Name</th>
+                    <th className="px-4 py-3">Email</th>
+                    <th className="px-4 py-3">Created</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 bg-white">
+                  {assistants.map((assistant) => (
+                    <tr key={assistant.id}>
+                      <td className="px-4 py-4 font-mono font-bold text-indigo-700">
+                        {assistant.id}
+                      </td>
+                      <td className="px-4 py-4 font-semibold text-slate-900">
+                        {assistant.name}
+                      </td>
+                      <td className="px-4 py-4 text-slate-600">
+                        {assistant.email}
+                      </td>
+                      <td className="px-4 py-4 text-slate-500">
+                        {assistant.createdAt}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {assistants.length === 0 && (
+              <div className="border-t border-slate-200 px-5 py-10 text-center text-sm text-slate-600">
+                No Assistant Librarian accounts have been created.
+              </div>
+            )}
+          </div>
+
+          <form
+            onSubmit={handleAddAssistant}
+            className="rounded-xl border border-slate-200 bg-slate-50 p-5"
+          >
+            <div className="mb-5 flex items-center gap-2">
+              <UserPlus size={20} className="text-indigo-700" />
+              <h4 className="font-bold">Create Assistant account</h4>
+            </div>
+
+            <label className="block text-sm font-semibold text-slate-700">
+              Assistant name
+              <input
+                required
+                value={assistantName}
+                onChange={(event) => setAssistantName(event.target.value)}
+                placeholder="Jane Sheppard"
+                className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal outline-none focus:border-slate-900"
+              />
+            </label>
+
+            <label className="mt-4 block text-sm font-semibold text-slate-700">
+              University email
+              <input
+                required
+                type="email"
+                value={assistantEmail}
+                onChange={(event) => setAssistantEmail(event.target.value)}
+                placeholder="jane.s@university.edu"
+                className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal outline-none focus:border-slate-900"
+              />
+            </label>
+
+            <p className="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600">
+              A sequential AST staff ID is generated automatically. Librarians use the standard system password configured for the course demo.
+            </p>
+
+            <button
+              type="submit"
+              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-700"
+            >
+              <UserPlus size={17} />
+              Create Assistant account
+            </button>
+          </form>
+        </div>
+      </div>
 
 
       <div className="rounded-xl border border-slate-200 bg-white p-6">
