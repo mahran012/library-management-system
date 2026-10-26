@@ -1,12 +1,15 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import {
   BookOpen,
+  CheckCircle2,
   Edit3,
+  Gift,
   LibraryBig,
   PackageCheck,
   Plus,
   Search,
   Trash2,
+  XCircle,
   X,
 } from 'lucide-react';
 
@@ -46,10 +49,13 @@ type Feedback = {
 export function ManagerDashboard() {
   const {
     books,
+    donations,
     currentUser,
     addBook,
     updateBook,
     deleteBook,
+    approveDonation,
+    rejectDonation,
   } = useLibrary();
 
   const [query, setQuery] = useState('');
@@ -57,6 +63,8 @@ export function ManagerDashboard() {
   const [editingBook, setEditingBook] = useState<Book | null>(null);
   const [editForm, setEditForm] = useState<BookSubmission>(EMPTY_FORM);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [donationShelf, setDonationShelf] = useState<Record<string, string>>({});
+  const [rejectionReason, setRejectionReason] = useState<Record<string, string>>({});
 
   const filteredBooks = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -84,6 +92,17 @@ export function ManagerDashboard() {
   const availableCopies = useMemo(
     () => books.reduce((sum, book) => sum + book.availableCopies, 0),
     [books],
+  );
+
+
+  const pendingDonations = useMemo(
+    () => donations.filter((donation) => donation.status === 'Pending'),
+    [donations],
+  );
+
+  const evaluatedDonations = useMemo(
+    () => donations.filter((donation) => donation.status !== 'Pending'),
+    [donations],
   );
 
   if (!currentUser || currentUser.role !== 'Manager') {
@@ -167,6 +186,41 @@ export function ManagerDashboard() {
       type: result.success ? 'success' : 'error',
       message: result.message,
     });
+  };
+
+
+  const handleApproveDonation = (donationId: string) => {
+    const result = approveDonation(
+      donationId,
+      donationShelf[donationId] ?? '',
+    );
+
+    setFeedback({
+      type: result.success ? 'success' : 'error',
+      message: result.message,
+    });
+
+    if (result.success) {
+      setDonationShelf((current) => ({ ...current, [donationId]: '' }));
+      setRejectionReason((current) => ({ ...current, [donationId]: '' }));
+    }
+  };
+
+  const handleRejectDonation = (donationId: string) => {
+    const result = rejectDonation(
+      donationId,
+      rejectionReason[donationId] ?? '',
+    );
+
+    setFeedback({
+      type: result.success ? 'success' : 'error',
+      message: result.message,
+    });
+
+    if (result.success) {
+      setDonationShelf((current) => ({ ...current, [donationId]: '' }));
+      setRejectionReason((current) => ({ ...current, [donationId]: '' }));
+    }
   };
 
   const formFields = (
@@ -277,7 +331,7 @@ export function ManagerDashboard() {
 
   return (
     <section className="space-y-8">
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-5">
           <div className="flex items-center justify-between">
             <p className="text-sm text-slate-500">Catalogue titles</p>
@@ -301,6 +355,14 @@ export function ManagerDashboard() {
           </div>
           <p className="mt-3 text-3xl font-bold">{availableCopies}</p>
         </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-5">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-500">Pending donations</p>
+            <Gift size={20} className="text-amber-600" />
+          </div>
+          <p className="mt-3 text-3xl font-bold">{pendingDonations.length}</p>
+        </div>
       </div>
 
       {feedback && (
@@ -315,6 +377,158 @@ export function ManagerDashboard() {
           {feedback.message}
         </div>
       )}
+
+
+      <div className="rounded-xl border border-slate-200 bg-white p-6">
+        <div className="mb-6 flex items-center gap-3">
+          <Gift size={22} className="text-amber-600" />
+          <div>
+            <h3 className="text-xl font-bold">Donation review queue</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Approve suitable donations into the catalogue or reject them with review notes.
+            </p>
+          </div>
+        </div>
+
+        {pendingDonations.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center text-sm text-slate-600">
+            No pending donation requests require review.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {pendingDonations.map((donation) => {
+              const matchingBook = books.find(
+                (book) =>
+                  book.isbn.replace(/[\s-]/g, '').toUpperCase() ===
+                  donation.isbn.replace(/[\s-]/g, '').toUpperCase(),
+              );
+
+              return (
+                <article
+                  key={donation.id}
+                  className="rounded-xl border border-slate-200 bg-slate-50 p-5"
+                >
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <span>{donation.donationType}</span>
+                        <span>·</span>
+                        <span>{donation.genre}</span>
+                        <span>·</span>
+                        <span>ISBN {donation.isbn}</span>
+                      </div>
+
+                      <h4 className="mt-2 text-lg font-bold">{donation.bookTitle}</h4>
+                      <p className="mt-1 text-sm text-slate-600">
+                        {donation.author} · Donated by {donation.donorName} ({donation.donorId})
+                      </p>
+
+                      {donation.donationType === 'Temporary' && (
+                        <p className="mt-2 text-sm font-semibold text-amber-700">
+                          Temporary donation for {donation.durationMonths ?? 1} month{(donation.durationMonths ?? 1) === 1 ? '' : 's'}
+                        </p>
+                      )}
+
+                      {matchingBook && (
+                        <p className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                          This ISBN already exists at {matchingBook.shelfLocation}. Approval will add one available copy to the existing catalogue record.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="w-full space-y-3 xl:w-96">
+                      {!matchingBook && (
+                        <label className="block text-sm font-semibold text-slate-700">
+                          Shelf location
+                          <input
+                            value={donationShelf[donation.id] ?? ''}
+                            onChange={(event) =>
+                              setDonationShelf((current) => ({
+                                ...current,
+                                [donation.id]: event.target.value,
+                              }))
+                            }
+                            placeholder="DON-A101"
+                            className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal outline-none focus:border-slate-900"
+                          />
+                        </label>
+                      )}
+
+                      <label className="block text-sm font-semibold text-slate-700">
+                        Rejection reason
+                        <input
+                          value={rejectionReason[donation.id] ?? ''}
+                          onChange={(event) =>
+                            setRejectionReason((current) => ({
+                              ...current,
+                              [donation.id]: event.target.value,
+                            }))
+                          }
+                          placeholder="Required only when rejecting"
+                          className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal outline-none focus:border-slate-900"
+                        />
+                      </label>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleApproveDonation(donation.id)}
+                          className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
+                        >
+                          <CheckCircle2 size={16} />
+                          Approve donation
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRejectDonation(donation.id)}
+                          className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50"
+                        >
+                          <XCircle size={16} />
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        {evaluatedDonations.length > 0 && (
+          <div className="mt-8 border-t border-slate-200 pt-6">
+            <h4 className="font-bold">Donation review history</h4>
+            <div className="mt-3 space-y-2">
+              {evaluatedDonations.slice(0, 8).map((donation) => (
+                <div
+                  key={donation.id}
+                  className="flex flex-col gap-1 rounded-lg bg-slate-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div>
+                    <span className="font-semibold">{donation.bookTitle}</span>
+                    <span className="text-slate-500"> · {donation.donorName}</span>
+                    {donation.rejectionReason && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Review note: {donation.rejectionReason}
+                      </p>
+                    )}
+                  </div>
+                  <span
+                    className={`font-semibold ${
+                      donation.status === 'Approved'
+                        ? 'text-green-700'
+                        : 'text-red-700'
+                    }`}
+                  >
+                    {donation.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-6">
         <div className="mb-6 flex items-center gap-3">

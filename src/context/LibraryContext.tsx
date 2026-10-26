@@ -81,6 +81,8 @@ interface LibraryContextValue {
   addBook: (submission: BookSubmission) => ActionResult;
   updateBook: (bookId: string, submission: BookSubmission) => ActionResult;
   deleteBook: (bookId: string) => ActionResult;
+  approveDonation: (donationId: string, shelfLocation: string) => ActionResult;
+  rejectDonation: (donationId: string, reason: string) => ActionResult;
 }
 interface LibraryProviderProps {
   children: ReactNode;
@@ -960,6 +962,190 @@ const deleteBook = (bookId: string): ActionResult => {
   };
 };
 
+
+const approveDonation = (
+  donationId: string,
+  shelfLocation: string,
+): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can approve donation requests.',
+    };
+  }
+
+  const donation = donations.find((candidate) => candidate.id === donationId);
+
+  if (!donation) {
+    return {
+      success: false,
+      message: 'The donation request could not be found.',
+    };
+  }
+
+  if (donation.status !== 'Pending') {
+    return {
+      success: false,
+      message: 'This donation request has already been evaluated.',
+    };
+  }
+
+  const normalizedShelfLocation = shelfLocation.trim().toUpperCase();
+  const normalizedDonationIsbn = normalizeIsbn(donation.isbn);
+  const existingBook = books.find(
+    (book) => normalizeIsbn(book.isbn) === normalizedDonationIsbn,
+  );
+
+  if (!existingBook && !normalizedShelfLocation) {
+    return {
+      success: false,
+      message: 'A shelf location is required before adding a donated title.',
+    };
+  }
+
+  if (existingBook) {
+    setBooks((currentBooks) =>
+      currentBooks.map((book) =>
+        book.id === existingBook.id
+          ? {
+              ...book,
+              totalCopies: book.totalCopies + 1,
+              availableCopies: book.availableCopies + 1,
+            }
+          : book,
+      ),
+    );
+  } else {
+    const donatedBook: Book = {
+      id: `BK-${crypto.randomUUID()}`,
+      title: donation.bookTitle.trim(),
+      author: donation.author.trim(),
+      isbn: normalizedDonationIsbn,
+      genre: donation.genre,
+      description:
+        donation.donationType === 'Temporary'
+          ? `Temporary donation from ${donation.donorName} for ${donation.durationMonths ?? 1} month${(donation.durationMonths ?? 1) === 1 ? '' : 's'}.`
+          : `Permanent donation from ${donation.donorName}.`,
+      imageUrl:
+        'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?auto=format&fit=crop&q=80&w=400',
+      shelfLocation: normalizedShelfLocation,
+      totalCopies: 1,
+      availableCopies: 1,
+    };
+
+    setBooks((currentBooks) => [donatedBook, ...currentBooks]);
+  }
+
+  setDonations((currentDonations) =>
+    currentDonations.map((candidate) =>
+      candidate.id === donationId
+        ? {
+            ...candidate,
+            status: 'Approved',
+            rejectionReason: undefined,
+          }
+        : candidate,
+    ),
+  );
+
+  const approvalDate = toDateString(new Date());
+  const finalShelfLocation = existingBook
+    ? existingBook.shelfLocation
+    : normalizedShelfLocation;
+
+  const notification: LibraryNotification = {
+    id: `NT-${crypto.randomUUID()}`,
+    userId: donation.donorId,
+    title: 'Donation Approved',
+    text: `Your donation request for \"${donation.bookTitle}\" was approved and integrated into the catalogue at ${finalShelfLocation}.`,
+    type: 'Success',
+    date: approvalDate,
+    isRead: false,
+  };
+
+  setNotifications((currentNotifications) => [
+    notification,
+    ...currentNotifications,
+  ]);
+
+  return {
+    success: true,
+    message: existingBook
+      ? `\"${donation.bookTitle}\" was approved and one copy was added to the existing catalogue record.`
+      : `\"${donation.bookTitle}\" was approved and added to the catalogue.`,
+  };
+};
+
+const rejectDonation = (
+  donationId: string,
+  reason: string,
+): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can reject donation requests.',
+    };
+  }
+
+  const donation = donations.find((candidate) => candidate.id === donationId);
+
+  if (!donation) {
+    return {
+      success: false,
+      message: 'The donation request could not be found.',
+    };
+  }
+
+  if (donation.status !== 'Pending') {
+    return {
+      success: false,
+      message: 'This donation request has already been evaluated.',
+    };
+  }
+
+  const normalizedReason = reason.trim();
+
+  if (!normalizedReason) {
+    return {
+      success: false,
+      message: 'A rejection reason is required.',
+    };
+  }
+
+  setDonations((currentDonations) =>
+    currentDonations.map((candidate) =>
+      candidate.id === donationId
+        ? {
+            ...candidate,
+            status: 'Rejected',
+            rejectionReason: normalizedReason,
+          }
+        : candidate,
+    ),
+  );
+
+  const rejectionDate = toDateString(new Date());
+  const notification: LibraryNotification = {
+    id: `NT-${crypto.randomUUID()}`,
+    userId: donation.donorId,
+    title: 'Donation Review Update',
+    text: `Your donation request for \"${donation.bookTitle}\" was not approved. Review notes: ${normalizedReason}`,
+    type: 'Alert',
+    date: rejectionDate,
+    isRead: false,
+  };
+
+  setNotifications((currentNotifications) => [
+    notification,
+    ...currentNotifications,
+  ]);
+
+  return {
+    success: true,
+    message: `\"${donation.bookTitle}\" was rejected and the donor was notified.`,
+  };
+};
+
 const value: LibraryContextValue = {
     books,
     records,
@@ -978,6 +1164,8 @@ const value: LibraryContextValue = {
     addBook,
     updateBook,
     deleteBook,
+    approveDonation,
+    rejectDonation,
   };
 return (
     <LibraryContext.Provider value={value}>
