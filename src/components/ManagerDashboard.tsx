@@ -19,6 +19,8 @@ import {
   Trash2,
   XCircle,
   X,
+  CalendarClock,
+  FastForward,
 } from 'lucide-react';
 
 import {
@@ -67,6 +69,8 @@ export function ManagerDashboard() {
     approveDonation,
     rejectDonation,
     addAssistant,
+    currentSystemDate,
+    simulateTimeTravelDays,
   } = useLibrary();
 
   const [query, setQuery] = useState('');
@@ -78,6 +82,7 @@ export function ManagerDashboard() {
   const [rejectionReason, setRejectionReason] = useState<Record<string, string>>({});
   const [assistantName, setAssistantName] = useState('');
   const [assistantEmail, setAssistantEmail] = useState('');
+  const [simulationDays, setSimulationDays] = useState(7);
 
   const filteredBooks = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -120,8 +125,7 @@ export function ManagerDashboard() {
 
 
   const analytics = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = new Date(`${currentSystemDate}T00:00:00`);
 
     const activeLoans = records.filter((record) => record.status === 'Borrowed');
     const pendingRequests = records.filter((record) => record.status === 'Requested');
@@ -213,7 +217,7 @@ export function ManagerDashboard() {
       genreInventory,
       maxGenreCopies,
     };
-  }, [availableCopies, books, donations, records, totalCopies]);
+  }, [availableCopies, books, currentSystemDate, donations, records, totalCopies]);
 
   if (!currentUser || currentUser.role !== 'Manager') {
     return null;
@@ -348,6 +352,16 @@ export function ManagerDashboard() {
       setAssistantName('');
       setAssistantEmail('');
     }
+  };
+
+
+  const handleTimeSimulation = (days: number = simulationDays) => {
+    const result = simulateTimeTravelDays(days);
+
+    setFeedback({
+      type: result.success ? 'success' : 'error',
+      message: result.message,
+    });
   };
 
   const formFields = (
@@ -507,6 +521,55 @@ export function ManagerDashboard() {
 
 
       <div className="rounded-xl border border-slate-200 bg-white p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-3">
+            <CalendarClock size={24} className="mt-0.5 text-blue-700" />
+            <div>
+              <h3 className="text-xl font-bold">System date simulation</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Advance the application date to verify overdue loans, dynamic fines and Student alerts without waiting for real calendar time.
+              </p>
+              <p className="mt-3 font-mono text-sm font-semibold text-blue-800">
+                Current system date: {currentSystemDate}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Days to advance
+              <input
+                type="number"
+                min={1}
+                max={365}
+                step={1}
+                value={simulationDays}
+                onChange={(event) => setSimulationDays(Number(event.target.value))}
+                className="mt-1 block w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-900"
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={() => handleTimeSimulation()}
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700"
+            >
+              <FastForward size={17} />
+              Advance date
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleTimeSimulation(7)}
+              className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              +7 days
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-6">
         <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-3">
             <BarChart3 size={24} className="mt-0.5 text-violet-700" />
@@ -548,7 +611,7 @@ export function ManagerDashboard() {
               <AlertTriangle size={19} className="text-red-700" />
             </div>
             <p className="mt-2 text-2xl font-bold">{analytics.overdueLoans}</p>
-            <p className="mt-1 text-xs text-slate-500">Based on today and each due date</p>
+            <p className="mt-1 text-xs text-slate-500">Based on simulated system date and each due date</p>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
