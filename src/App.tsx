@@ -41,9 +41,9 @@ const VIEW_CONTENT: Record<
       'Review borrowing requests, direct issues, returns and fine settlements.',
   },
   management: {
-    title: 'Catalogue Management',
+    title: 'Management & Analytics',
     description:
-      'Add, edit and remove catalogue books while protecting active circulation records.',
+      'Manage catalogue inventory, donation review, Assistant Librarians and live library analytics.',
   },
 };
 
