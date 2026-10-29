@@ -2,15 +2,20 @@ import { useEffect, useState } from 'react';
 
 import { Sidebar, type NavigationView } from './components/Sidebar';
 import { BookSearchGrid } from './components/BookSearchGrid';
+import { LibrarianDashboard } from './components/LibrarianDashboard';
 import { LoginPage } from './components/LoginPage';
+import { ManagerDashboard } from './components/ManagerDashboard';
 import { StudentDashboard } from './components/StudentDashboard';
 import { StudentDonations } from './components/StudentDonations';
 import { useLibrary } from './context/LibraryContext';
 
-const VIEW_CONTENT: Record<NavigationView, {
-  title: string;
-  description: string;
-}> = {
+const VIEW_CONTENT: Record<
+  NavigationView,
+  {
+    title: string;
+    description: string;
+  }
+> = {
   overview: {
     title: 'Library Overview',
     description: 'Your role-based library workspace is ready.',
@@ -33,12 +38,12 @@ const VIEW_CONTENT: Record<NavigationView, {
   circulation: {
     title: 'Circulation',
     description:
-      'Borrow confirmation, issuing, returns and fine handling will be implemented in later tasks.',
+      'Review borrowing requests, direct issues, returns and fine settlements.',
   },
   management: {
-    title: 'Management',
+    title: 'Management & Analytics',
     description:
-      'Catalogue administration, donation review and analytics will be implemented in later tasks.',
+      'Manage catalogue inventory, donation review, Assistant Librarians and live library analytics.',
   },
 };
 
@@ -69,6 +74,14 @@ function App() {
       if (activeView === 'donations') {
         return <StudentDonations />;
       }
+    }
+
+    if (currentUser.role === 'Librarian' && activeView === 'circulation') {
+      return <LibrarianDashboard />;
+    }
+
+    if (currentUser.role === 'Manager' && activeView === 'management') {
+      return <ManagerDashboard />;
     }
 
     return (

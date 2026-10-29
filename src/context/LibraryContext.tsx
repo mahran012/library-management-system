@@ -5,7 +5,6 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-
 import {
   INITIAL_ASSISTANTS,
   INITIAL_BOOKS,
@@ -13,7 +12,6 @@ import {
   INITIAL_NOTIFICATIONS,
   INITIAL_RECORDS,
 } from '../data';
-
 import type {
   AssistantAccount,
   Book,
@@ -24,24 +22,20 @@ import type {
   LibraryNotification,
   User,
 } from '../types';
-
 interface LoginResult {
   success: boolean;
   error?: string;
 }
-
 interface ActionResult {
   success: boolean;
   message: string;
 }
-
 interface AuthResponse {
   success: boolean;
   token?: string;
   user?: User;
   message?: string;
 }
-
 export interface DonationSubmission {
   bookTitle: string;
   author: string;
@@ -51,6 +45,16 @@ export interface DonationSubmission {
   durationMonths?: number;
 }
 
+export interface BookSubmission {
+  title: string;
+  author: string;
+  isbn: string;
+  genre: Genre;
+  description: string;
+  imageUrl: string;
+  shelfLocation: string;
+  totalCopies: number;
+}
 interface LibraryContextValue {
   books: Book[];
   records: BorrowingRecord[];
@@ -58,6 +62,7 @@ interface LibraryContextValue {
   assistants: AssistantAccount[];
   notifications: LibraryNotification[];
   currentUser: User | null;
+  currentSystemDate: string;
   login: (
     universityId: string,
     role: User['role'],
@@ -66,12 +71,25 @@ interface LibraryContextValue {
   logout: () => void;
   requestBorrow: (bookId: string) => ActionResult;
   submitDonation: (submission: DonationSubmission) => ActionResult;
+  confirmBorrowRequest: (recordId: string) => ActionResult;
+  issueBook: (
+    studentId: string,
+    studentName: string,
+    bookId: string,
+  ) => ActionResult;
+  returnBook: (recordId: string) => ActionResult;
+  settleFine: (recordId: string) => ActionResult;
+  addBook: (submission: BookSubmission) => ActionResult;
+  updateBook: (bookId: string, submission: BookSubmission) => ActionResult;
+  deleteBook: (bookId: string) => ActionResult;
+  approveDonation: (donationId: string, shelfLocation: string) => ActionResult;
+  rejectDonation: (donationId: string, reason: string) => ActionResult;
+  addAssistant: (name: string, email: string) => ActionResult;
+  simulateTimeTravelDays: (days: number) => ActionResult;
 }
-
 interface LibraryProviderProps {
   children: ReactNode;
 }
-
 const STORAGE_KEYS = {
   books: 'lms_books',
   records: 'lms_records',
@@ -80,8 +98,8 @@ const STORAGE_KEYS = {
   notifications: 'lms_notifications',
   currentUser: 'lms_current_user',
   jwtToken: 'lms_jwt_token',
+  systemDate: 'lms_system_date',
 } as const;
-
 const SUPPORTED_GENRES: Genre[] = [
   'Algorithms',
   'Systems',
@@ -92,65 +110,55 @@ const SUPPORTED_GENRES: Genre[] = [
   'DevOps',
   'Languages',
 ];
-
 function loadFromStorage<T>(key: string, fallback: T): T {
-  const storedValue = localStorage.getItem(key);
-
+const storedValue = localStorage.getItem(key);
   if (!storedValue) {
-    return fallback;
+return fallback;
   }
-
   try {
-    return JSON.parse(storedValue) as T;
+return JSON.parse(storedValue) as T;
   } catch {
     console.warn(
       `Invalid persisted library data was found for "${key}". Fallback data will be used.`,
     );
     localStorage.removeItem(key);
-    return fallback;
+return fallback;
   }
 }
-
 function toDateString(date: Date): string {
-  return date.toISOString().split('T')[0];
+return date.toISOString().split('T')[0];
 }
-
 function addDays(date: Date, numberOfDays: number): Date {
-  const result = new Date(date);
+const result = new Date(date);
   result.setDate(result.getDate() + numberOfDays);
-  return result;
+return result;
 }
-
 const LibraryContext = createContext<LibraryContextValue | undefined>(
   undefined,
 );
-
 export function LibraryProvider({ children }: LibraryProviderProps) {
-  const [books] = useState<Book[]>(() =>
+const [books, setBooks] = useState<Book[]>(() =>
     loadFromStorage(STORAGE_KEYS.books, INITIAL_BOOKS),
   );
-
-  const [records, setRecords] = useState<BorrowingRecord[]>(() =>
+const [records, setRecords] = useState<BorrowingRecord[]>(() =>
     loadFromStorage(STORAGE_KEYS.records, INITIAL_RECORDS),
   );
-
-  const [donations, setDonations] = useState<Donation[]>(() =>
+const [donations, setDonations] = useState<Donation[]>(() =>
     loadFromStorage(STORAGE_KEYS.donations, INITIAL_DONATIONS),
   );
-
-  const [assistants] = useState<AssistantAccount[]>(() =>
+const [assistants, setAssistants] = useState<AssistantAccount[]>(() =>
     loadFromStorage(STORAGE_KEYS.assistants, INITIAL_ASSISTANTS),
   );
-
-  const [notifications, setNotifications] =
+const [notifications, setNotifications] =
     useState<LibraryNotification[]>(() =>
       loadFromStorage(STORAGE_KEYS.notifications, INITIAL_NOTIFICATIONS),
     );
-
-  const [currentUser, setCurrentUser] = useState<User | null>(() =>
+const [currentUser, setCurrentUser] = useState<User | null>(() =>
     loadFromStorage<User | null>(STORAGE_KEYS.currentUser, null),
   );
-
+const [systemDate, setSystemDate] = useState<string>(() =>
+    loadFromStorage(STORAGE_KEYS.systemDate, toDateString(new Date())),
+  );
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.books, JSON.stringify(books));
     localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(records));
@@ -160,25 +168,22 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
       STORAGE_KEYS.notifications,
       JSON.stringify(notifications),
     );
-  }, [books, records, donations, assistants, notifications]);
-
+    localStorage.setItem(STORAGE_KEYS.systemDate, JSON.stringify(systemDate));
+  }, [books, records, donations, assistants, notifications, systemDate]);
   useEffect(() => {
-    const token = localStorage.getItem(STORAGE_KEYS.jwtToken);
-
+const token = localStorage.getItem(STORAGE_KEYS.jwtToken);
     if (!token) {
       if (currentUser) {
         setCurrentUser(null);
         localStorage.removeItem(STORAGE_KEYS.currentUser);
       }
-      return;
+return;
     }
-
     fetch('/api/verify', {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(async (response) => {
-        const data = (await response.json()) as AuthResponse;
-
+const data = (await response.json()) as AuthResponse;
         if (!response.ok || !data.success) {
           setCurrentUser(null);
           localStorage.removeItem(STORAGE_KEYS.currentUser);
@@ -190,107 +195,93 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
           'Authentication token could not be verified because the server is unavailable.',
         );
       });
-    // Restore the existing session at application startup.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+// Restore the existing session at application startup.
+// eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const login = async (
+const login = async (
     universityId: string,
     role: User['role'],
     password: string,
   ): Promise<LoginResult> => {
     try {
-      const response = await fetch('/api/login', {
+const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ universityId, role, password }),
       });
-
-      const data = (await response.json()) as AuthResponse;
-
+const data = (await response.json()) as AuthResponse;
       if (!response.ok || !data.success || !data.token || !data.user) {
-        return {
+return {
           success: false,
           error:
             data.message ??
             'Authentication failed. Please check your credentials.',
         };
       }
-
       setCurrentUser(data.user);
       localStorage.setItem(
         STORAGE_KEYS.currentUser,
         JSON.stringify(data.user),
       );
       localStorage.setItem(STORAGE_KEYS.jwtToken, data.token);
-      return { success: true };
+return { success: true };
     } catch {
-      return {
+return {
         success: false,
         error: 'The authentication server could not be reached. Please try again.',
       };
     }
   };
-
-  const logout = () => {
+const logout = () => {
     setCurrentUser(null);
     localStorage.removeItem(STORAGE_KEYS.currentUser);
     localStorage.removeItem(STORAGE_KEYS.jwtToken);
   };
-
-  const hasOutstandingFines = (studentId: string): boolean =>
+const hasOutstandingFines = (studentId: string): boolean =>
     records.some(
       (record) =>
         record.studentId === studentId &&
         record.fineAmount > 0 &&
         !record.finePaid,
     );
-
-  const requestBorrow = (bookId: string): ActionResult => {
+const requestBorrow = (bookId: string): ActionResult => {
     if (!currentUser || currentUser.role !== 'Student') {
-      return {
+return {
         success: false,
         message: 'Only authenticated students can request library books.',
       };
     }
-
-    const book = books.find((candidate) => candidate.id === bookId);
-
+const book = books.find((candidate) => candidate.id === bookId);
     if (!book) {
-      return { success: false, message: 'The selected book could not be found.' };
+return { success: false, message: 'The selected book could not be found.' };
     }
-
     if (book.availableCopies <= 0) {
-      return {
+return {
         success: false,
         message: 'This book is currently unavailable for borrowing.',
       };
     }
-
     if (hasOutstandingFines(currentUser.universityId)) {
-      return {
+return {
         success: false,
         message:
           'Outstanding library fines must be settled before requesting another book.',
       };
     }
-
-    const duplicateRecord = records.some(
+const duplicateRecord = records.some(
       (record) =>
         record.studentId === currentUser.universityId &&
         record.bookId === book.id &&
         record.status !== 'Returned',
     );
-
     if (duplicateRecord) {
-      return {
+return {
         success: false,
         message: 'You already have an active request or loan for this book.',
       };
     }
-
-    const requestDate = new Date();
-    const record: BorrowingRecord = {
+const requestDate = new Date(`${systemDate}T00:00:00`);
+const record: BorrowingRecord = {
       id: `BR-${crypto.randomUUID()}`,
       studentId: currentUser.universityId,
       studentName: currentUser.name,
@@ -302,8 +293,7 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
       fineAmount: 0,
       finePaid: false,
     };
-
-    const notification: LibraryNotification = {
+const notification: LibraryNotification = {
       id: `NT-${crypto.randomUUID()}`,
       userId: currentUser.universityId,
       title: 'Borrow Request Submitted',
@@ -312,68 +302,58 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
       date: toDateString(requestDate),
       isRead: false,
     };
-
     setRecords((currentRecords) => [record, ...currentRecords]);
     setNotifications((currentNotifications) => [
       notification,
-      ...currentNotifications,
+...currentNotifications,
     ]);
-
-    return {
+return {
       success: true,
       message:
         'Borrow request submitted successfully. A librarian must approve it before the book is issued.',
     };
   };
-
-  const submitDonation = (submission: DonationSubmission): ActionResult => {
+const submitDonation = (submission: DonationSubmission): ActionResult => {
     if (!currentUser || currentUser.role !== 'Student') {
-      return {
+return {
         success: false,
         message: 'Only authenticated students can submit donation requests.',
       };
     }
-
-    const bookTitle = submission.bookTitle.trim();
-    const author = submission.author.trim();
-    const isbn = submission.isbn.replace(/[\s-]/g, '').toUpperCase();
-
+const bookTitle = submission.bookTitle.trim();
+const author = submission.author.trim();
+const isbn = submission.isbn.replace(/[\s-]/g, '').toUpperCase();
     if (!bookTitle || !author || !isbn) {
-      return {
+return {
         success: false,
         message: 'Book title, author and ISBN are required.',
       };
     }
-
     if (!/^(?:\d{10}|\d{13}|\d{9}X)$/.test(isbn)) {
-      return {
+return {
         success: false,
         message: 'Enter a valid ISBN-10 or ISBN-13 format.',
       };
     }
-
     if (!SUPPORTED_GENRES.includes(submission.genre)) {
-      return { success: false, message: 'Please select a supported genre.' };
+return { success: false, message: 'Please select a supported genre.' };
     }
-
     if (submission.donationType !== 'Permanent' &&
         submission.donationType !== 'Temporary') {
-      return { success: false, message: 'Please select a donation type.' };
+return { success: false, message: 'Please select a donation type.' };
     }
-
     if (
       submission.donationType === 'Temporary' &&
       (!Number.isInteger(submission.durationMonths) ||
         (submission.durationMonths ?? 0) < 1)
     ) {
-      return {
+return {
         success: false,
         message: 'Temporary donations require a positive whole-number duration.',
       };
     }
-
-    const today = new Date();
-    const donation: Donation = {
+const today = new Date(`${systemDate}T00:00:00`);
+const donation: Donation = {
       id: `DON-${crypto.randomUUID()}`,
       donorId: currentUser.universityId,
       donorName: currentUser.name,
@@ -382,14 +362,13 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
       isbn,
       genre: submission.genre,
       donationType: submission.donationType,
-      ...(submission.donationType === 'Temporary'
+...(submission.donationType === 'Temporary'
         ? { durationMonths: submission.durationMonths }
         : {}),
       status: 'Pending',
       requestedAt: today.toISOString(),
     };
-
-    const notification: LibraryNotification = {
+const notification: LibraryNotification = {
       id: `NT-${crypto.randomUUID()}`,
       userId: currentUser.universityId,
       title: 'Donation Request Submitted',
@@ -398,45 +377,967 @@ export function LibraryProvider({ children }: LibraryProviderProps) {
       date: toDateString(today),
       isRead: false,
     };
-
     setDonations((currentDonations) => [donation, ...currentDonations]);
     setNotifications((currentNotifications) => [
       notification,
-      ...currentNotifications,
+...currentNotifications,
     ]);
-
-    return {
+return {
       success: true,
       message: `Your donation request for "${bookTitle}" was submitted for review.`,
     };
   };
+const confirmBorrowRequest = (recordId: string): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Librarian') {
+    return {
+      success: false,
+      message: 'Only authenticated librarians can approve borrowing requests.',
+    };
+  }
 
-  const value: LibraryContextValue = {
+  const record = records.find((candidate) => candidate.id === recordId);
+
+  if (!record) {
+    return {
+      success: false,
+      message: 'The borrowing request could not be found.',
+    };
+  }
+
+  if (record.status !== 'Requested') {
+    return {
+      success: false,
+      message: 'This borrowing request has already been processed.',
+    };
+  }
+
+  const book = books.find((candidate) => candidate.id === record.bookId);
+
+  if (!book) {
+    return {
+      success: false,
+      message: 'The requested book could not be found.',
+    };
+  }
+
+  if (book.availableCopies <= 0) {
+    return {
+      success: false,
+      message:
+        'The request cannot be approved because no copies are currently available.',
+    };
+  }
+
+  const approvalDate = new Date(`${systemDate}T00:00:00`);
+  const borrowDate = toDateString(approvalDate);
+  const dueDate = toDateString(addDays(approvalDate, 14));
+
+  setRecords((currentRecords) =>
+    currentRecords.map((candidate) =>
+      candidate.id === recordId
+        ? {
+            ...candidate,
+            status: 'Borrowed',
+            borrowDate,
+            dueDate,
+          }
+        : candidate,
+    ),
+  );
+
+  setBooks((currentBooks) =>
+    currentBooks.map((candidate) =>
+      candidate.id === book.id
+        ? {
+            ...candidate,
+            availableCopies: candidate.availableCopies - 1,
+          }
+        : candidate,
+    ),
+  );
+
+  const notification: LibraryNotification = {
+    id: `NT-${crypto.randomUUID()}`,
+    userId: record.studentId,
+    title: 'Borrow Request Approved',
+    text: `Your request for "${record.bookTitle}" was approved. The book is due on ${dueDate}.`,
+    type: 'Success',
+    date: borrowDate,
+    isRead: false,
+  };
+
+  setNotifications((currentNotifications) => [
+    notification,
+    ...currentNotifications,
+  ]);
+
+  return {
+    success: true,
+    message: `"${record.bookTitle}" was issued to ${record.studentName}.`,
+  };
+};
+
+
+const issueBook = (
+  studentId: string,
+  studentName: string,
+  bookId: string,
+): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Librarian') {
+    return {
+      success: false,
+      message: 'Only authenticated librarians can issue library books.',
+    };
+  }
+
+  const normalizedStudentId = studentId.trim();
+  const normalizedStudentName = studentName.trim();
+
+  if (!normalizedStudentId || !normalizedStudentName) {
+    return {
+      success: false,
+      message: 'Student ID and Student name are required.',
+    };
+  }
+
+  const book = books.find((candidate) => candidate.id === bookId);
+
+  if (!book) {
+    return {
+      success: false,
+      message: 'The selected book could not be found.',
+    };
+  }
+
+  if (book.availableCopies <= 0) {
+    return {
+      success: false,
+      message: 'The selected book has no available copies.',
+    };
+  }
+
+  if (hasOutstandingFines(normalizedStudentId)) {
+    return {
+      success: false,
+      message:
+        'This Student has outstanding unpaid fines and cannot receive another book.',
+    };
+  }
+
+  const duplicateLoan = records.some(
+    (record) =>
+      record.studentId === normalizedStudentId &&
+      record.bookId === book.id &&
+      record.status !== 'Returned',
+  );
+
+  if (duplicateLoan) {
+    return {
+      success: false,
+      message:
+        'This Student already has an active request or loan for this book.',
+    };
+  }
+
+  const issueDate = new Date(`${systemDate}T00:00:00`);
+  const borrowDate = toDateString(issueDate);
+  const dueDate = toDateString(addDays(issueDate, 14));
+
+  const record: BorrowingRecord = {
+    id: `BR-${crypto.randomUUID()}`,
+    studentId: normalizedStudentId,
+    studentName: normalizedStudentName,
+    bookId: book.id,
+    bookTitle: book.title,
+    borrowDate,
+    dueDate,
+    status: 'Borrowed',
+    fineAmount: 0,
+    finePaid: false,
+  };
+
+  setRecords((currentRecords) => [record, ...currentRecords]);
+
+  setBooks((currentBooks) =>
+    currentBooks.map((candidate) =>
+      candidate.id === book.id
+        ? {
+            ...candidate,
+            availableCopies: candidate.availableCopies - 1,
+          }
+        : candidate,
+    ),
+  );
+
+  const notification: LibraryNotification = {
+    id: `NT-${crypto.randomUUID()}`,
+    userId: normalizedStudentId,
+    title: 'Book Issued',
+    text: `"${book.title}" was issued to you and is due on ${dueDate}.`,
+    type: 'Success',
+    date: borrowDate,
+    isRead: false,
+  };
+
+  setNotifications((currentNotifications) => [
+    notification,
+    ...currentNotifications,
+  ]);
+
+  return {
+    success: true,
+    message: `"${book.title}" was issued to ${normalizedStudentName}.`,
+  };
+};
+
+const returnBook = (recordId: string): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Librarian') {
+    return {
+      success: false,
+      message: 'Only authenticated librarians can process book returns.',
+    };
+  }
+
+  const record = records.find((candidate) => candidate.id === recordId);
+
+  if (!record) {
+    return {
+      success: false,
+      message: 'The borrowing record could not be found.',
+    };
+  }
+
+  if (record.status !== 'Borrowed') {
+    return {
+      success: false,
+      message: 'Only active Borrowed records can be returned.',
+    };
+  }
+
+  const book = books.find((candidate) => candidate.id === record.bookId);
+
+  if (!book) {
+    return {
+      success: false,
+      message: 'The borrowed book could not be found in the catalogue.',
+    };
+  }
+
+  const returnDateValue = new Date(`${systemDate}T00:00:00`);
+  const returnDate = toDateString(returnDateValue);
+  const dueDateValue = new Date(`${record.dueDate}T00:00:00`);
+  const currentDateValue = new Date(`${returnDate}T00:00:00`);
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+  const lateDays = Math.max(
+    0,
+    Math.ceil(
+      (currentDateValue.getTime() - dueDateValue.getTime()) /
+        millisecondsPerDay,
+    ),
+  );
+  const fineAmount = lateDays;
+
+  setRecords((currentRecords) =>
+    currentRecords.map((candidate) =>
+      candidate.id === recordId
+        ? {
+            ...candidate,
+            status: 'Returned',
+            returnDate,
+            fineAmount,
+            finePaid: false,
+          }
+        : candidate,
+    ),
+  );
+
+  setBooks((currentBooks) =>
+    currentBooks.map((candidate) =>
+      candidate.id === book.id
+        ? {
+            ...candidate,
+            availableCopies: Math.min(
+              candidate.totalCopies,
+              candidate.availableCopies + 1,
+            ),
+          }
+        : candidate,
+    ),
+  );
+
+  const notification: LibraryNotification = {
+    id: `NT-${crypto.randomUUID()}`,
+    userId: record.studentId,
+    title: 'Book Returned',
+    text:
+      fineAmount > 0
+        ? `\"${record.bookTitle}\" was returned ${lateDays} day${lateDays === 1 ? '' : 's'} late. An overdue fine of $${fineAmount.toFixed(2)} was recorded.`
+        : `\"${record.bookTitle}\" was returned successfully with no overdue fine.`,
+    type: fineAmount > 0 ? 'Alert' : 'Success',
+    date: returnDate,
+    isRead: false,
+  };
+
+  setNotifications((currentNotifications) => [
+    notification,
+    ...currentNotifications,
+  ]);
+
+  return {
+    success: true,
+    message:
+      fineAmount > 0
+        ? `\"${record.bookTitle}\" was returned. ${lateDays} overdue day${lateDays === 1 ? '' : 's'} produced a $${fineAmount.toFixed(2)} fine.`
+        : `\"${record.bookTitle}\" was returned successfully with no overdue fine.`,
+  };
+};
+
+
+const settleFine = (recordId: string): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Librarian') {
+    return {
+      success: false,
+      message: 'Only authenticated librarians can record fine settlements.',
+    };
+  }
+
+  const record = records.find((candidate) => candidate.id === recordId);
+
+  if (!record) {
+    return {
+      success: false,
+      message: 'The borrowing record could not be found.',
+    };
+  }
+
+  if (record.status !== 'Returned') {
+    return {
+      success: false,
+      message: 'A fine can only be settled after the book has been returned.',
+    };
+  }
+
+  if (record.fineAmount <= 0) {
+    return {
+      success: false,
+      message: 'This borrowing record does not have an outstanding fine.',
+    };
+  }
+
+  if (record.finePaid) {
+    return {
+      success: false,
+      message: 'This fine has already been settled.',
+    };
+  }
+
+  setRecords((currentRecords) =>
+    currentRecords.map((candidate) =>
+      candidate.id === recordId
+        ? {
+            ...candidate,
+            finePaid: true,
+          }
+        : candidate,
+    ),
+  );
+
+  const settlementDate = systemDate;
+  const notification: LibraryNotification = {
+    id: `NT-${crypto.randomUUID()}`,
+    userId: record.studentId,
+    title: 'Fine Settled',
+    text: `Your $${record.fineAmount.toFixed(2)} overdue fine for \"${record.bookTitle}\" was recorded as paid.`,
+    type: 'Success',
+    date: settlementDate,
+    isRead: false,
+  };
+
+  setNotifications((currentNotifications) => [
+    notification,
+    ...currentNotifications,
+  ]);
+
+  return {
+    success: true,
+    message: `$${record.fineAmount.toFixed(2)} fine for \"${record.bookTitle}\" was recorded as paid for ${record.studentName}.`,
+  };
+};
+
+const normalizeIsbn = (value: string): string =>
+  value.replace(/[\s-]/g, '').toUpperCase();
+
+const validateBookSubmission = (
+  submission: BookSubmission,
+  excludedBookId?: string,
+): ActionResult => {
+  const title = submission.title.trim();
+  const author = submission.author.trim();
+  const isbn = normalizeIsbn(submission.isbn);
+  const shelfLocation = submission.shelfLocation.trim();
+
+  if (!title || !author || !isbn || !shelfLocation) {
+    return {
+      success: false,
+      message: 'Title, author, ISBN and shelf location are required.',
+    };
+  }
+
+  if (!/^(?:\d{10}|\d{13}|\d{9}X)$/.test(isbn)) {
+    return {
+      success: false,
+      message: 'Enter a valid ISBN-10 or ISBN-13 format.',
+    };
+  }
+
+  if (!SUPPORTED_GENRES.includes(submission.genre)) {
+    return {
+      success: false,
+      message: 'Please select a supported genre.',
+    };
+  }
+
+  if (!Number.isInteger(submission.totalCopies) || submission.totalCopies < 1) {
+    return {
+      success: false,
+      message: 'Total copies must be a positive whole number.',
+    };
+  }
+
+  const duplicateIsbn = books.some(
+    (book) =>
+      book.id !== excludedBookId && normalizeIsbn(book.isbn) === isbn,
+  );
+
+  if (duplicateIsbn) {
+    return {
+      success: false,
+      message: 'A catalogue book with this ISBN already exists.',
+    };
+  }
+
+  return { success: true, message: 'Book data is valid.' };
+};
+
+const addBook = (submission: BookSubmission): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can add catalogue books.',
+    };
+  }
+
+  const validation = validateBookSubmission(submission);
+  if (!validation.success) {
+    return validation;
+  }
+
+  const book: Book = {
+    id: `BK-${crypto.randomUUID()}`,
+    title: submission.title.trim(),
+    author: submission.author.trim(),
+    isbn: normalizeIsbn(submission.isbn),
+    genre: submission.genre,
+    description:
+      submission.description.trim() ||
+      'University library catalogue resource.',
+    imageUrl:
+      submission.imageUrl.trim() ||
+      'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?auto=format&fit=crop&q=80&w=400',
+    shelfLocation: submission.shelfLocation.trim().toUpperCase(),
+    totalCopies: submission.totalCopies,
+    availableCopies: submission.totalCopies,
+  };
+
+  setBooks((currentBooks) => [book, ...currentBooks]);
+
+  return {
+    success: true,
+    message: `\"${book.title}\" was added to the catalogue.`,
+  };
+};
+
+const updateBook = (
+  bookId: string,
+  submission: BookSubmission,
+): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can edit catalogue books.',
+    };
+  }
+
+  const existingBook = books.find((book) => book.id === bookId);
+
+  if (!existingBook) {
+    return {
+      success: false,
+      message: 'The catalogue book could not be found.',
+    };
+  }
+
+  const validation = validateBookSubmission(submission, bookId);
+  if (!validation.success) {
+    return validation;
+  }
+
+  const borrowedCopies =
+    existingBook.totalCopies - existingBook.availableCopies;
+
+  if (submission.totalCopies < borrowedCopies) {
+    return {
+      success: false,
+      message: `Total copies cannot be lower than the ${borrowedCopies} currently issued ${borrowedCopies === 1 ? 'copy' : 'copies'}.`,
+    };
+  }
+
+  const normalizedTitle = submission.title.trim();
+
+  setBooks((currentBooks) =>
+    currentBooks.map((book) =>
+      book.id === bookId
+        ? {
+            ...book,
+            title: normalizedTitle,
+            author: submission.author.trim(),
+            isbn: normalizeIsbn(submission.isbn),
+            genre: submission.genre,
+            description:
+              submission.description.trim() ||
+              'University library catalogue resource.',
+            imageUrl:
+              submission.imageUrl.trim() ||
+              'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?auto=format&fit=crop&q=80&w=400',
+            shelfLocation: submission.shelfLocation.trim().toUpperCase(),
+            totalCopies: submission.totalCopies,
+            availableCopies: submission.totalCopies - borrowedCopies,
+          }
+        : book,
+    ),
+  );
+
+  setRecords((currentRecords) =>
+    currentRecords.map((record) =>
+      record.bookId === bookId && record.status !== 'Returned'
+        ? { ...record, bookTitle: normalizedTitle }
+        : record,
+    ),
+  );
+
+  return {
+    success: true,
+    message: `\"${normalizedTitle}\" was updated successfully.`,
+  };
+};
+
+const deleteBook = (bookId: string): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can delete catalogue books.',
+    };
+  }
+
+  const book = books.find((candidate) => candidate.id === bookId);
+
+  if (!book) {
+    return {
+      success: false,
+      message: 'The catalogue book could not be found.',
+    };
+  }
+
+  const hasActiveReference = records.some(
+    (record) => record.bookId === bookId && record.status !== 'Returned',
+  );
+
+  if (hasActiveReference) {
+    return {
+      success: false,
+      message:
+        'This book cannot be deleted while it has a pending request or active loan.',
+    };
+  }
+
+  setBooks((currentBooks) =>
+    currentBooks.filter((candidate) => candidate.id !== bookId),
+  );
+
+  return {
+    success: true,
+    message: `\"${book.title}\" was removed from the catalogue.`,
+  };
+};
+
+
+const approveDonation = (
+  donationId: string,
+  shelfLocation: string,
+): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can approve donation requests.',
+    };
+  }
+
+  const donation = donations.find((candidate) => candidate.id === donationId);
+
+  if (!donation) {
+    return {
+      success: false,
+      message: 'The donation request could not be found.',
+    };
+  }
+
+  if (donation.status !== 'Pending') {
+    return {
+      success: false,
+      message: 'This donation request has already been evaluated.',
+    };
+  }
+
+  const normalizedShelfLocation = shelfLocation.trim().toUpperCase();
+  const normalizedDonationIsbn = normalizeIsbn(donation.isbn);
+  const existingBook = books.find(
+    (book) => normalizeIsbn(book.isbn) === normalizedDonationIsbn,
+  );
+
+  if (!existingBook && !normalizedShelfLocation) {
+    return {
+      success: false,
+      message: 'A shelf location is required before adding a donated title.',
+    };
+  }
+
+  if (existingBook) {
+    setBooks((currentBooks) =>
+      currentBooks.map((book) =>
+        book.id === existingBook.id
+          ? {
+              ...book,
+              totalCopies: book.totalCopies + 1,
+              availableCopies: book.availableCopies + 1,
+            }
+          : book,
+      ),
+    );
+  } else {
+    const donatedBook: Book = {
+      id: `BK-${crypto.randomUUID()}`,
+      title: donation.bookTitle.trim(),
+      author: donation.author.trim(),
+      isbn: normalizedDonationIsbn,
+      genre: donation.genre,
+      description:
+        donation.donationType === 'Temporary'
+          ? `Temporary donation from ${donation.donorName} for ${donation.durationMonths ?? 1} month${(donation.durationMonths ?? 1) === 1 ? '' : 's'}.`
+          : `Permanent donation from ${donation.donorName}.`,
+      imageUrl:
+        'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?auto=format&fit=crop&q=80&w=400',
+      shelfLocation: normalizedShelfLocation,
+      totalCopies: 1,
+      availableCopies: 1,
+    };
+
+    setBooks((currentBooks) => [donatedBook, ...currentBooks]);
+  }
+
+  setDonations((currentDonations) =>
+    currentDonations.map((candidate) =>
+      candidate.id === donationId
+        ? {
+            ...candidate,
+            status: 'Approved',
+            rejectionReason: undefined,
+          }
+        : candidate,
+    ),
+  );
+
+  const approvalDate = systemDate;
+  const finalShelfLocation = existingBook
+    ? existingBook.shelfLocation
+    : normalizedShelfLocation;
+
+  const notification: LibraryNotification = {
+    id: `NT-${crypto.randomUUID()}`,
+    userId: donation.donorId,
+    title: 'Donation Approved',
+    text: `Your donation request for \"${donation.bookTitle}\" was approved and integrated into the catalogue at ${finalShelfLocation}.`,
+    type: 'Success',
+    date: approvalDate,
+    isRead: false,
+  };
+
+  setNotifications((currentNotifications) => [
+    notification,
+    ...currentNotifications,
+  ]);
+
+  return {
+    success: true,
+    message: existingBook
+      ? `\"${donation.bookTitle}\" was approved and one copy was added to the existing catalogue record.`
+      : `\"${donation.bookTitle}\" was approved and added to the catalogue.`,
+  };
+};
+
+const rejectDonation = (
+  donationId: string,
+  reason: string,
+): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can reject donation requests.',
+    };
+  }
+
+  const donation = donations.find((candidate) => candidate.id === donationId);
+
+  if (!donation) {
+    return {
+      success: false,
+      message: 'The donation request could not be found.',
+    };
+  }
+
+  if (donation.status !== 'Pending') {
+    return {
+      success: false,
+      message: 'This donation request has already been evaluated.',
+    };
+  }
+
+  const normalizedReason = reason.trim();
+
+  if (!normalizedReason) {
+    return {
+      success: false,
+      message: 'A rejection reason is required.',
+    };
+  }
+
+  setDonations((currentDonations) =>
+    currentDonations.map((candidate) =>
+      candidate.id === donationId
+        ? {
+            ...candidate,
+            status: 'Rejected',
+            rejectionReason: normalizedReason,
+          }
+        : candidate,
+    ),
+  );
+
+  const rejectionDate = systemDate;
+  const notification: LibraryNotification = {
+    id: `NT-${crypto.randomUUID()}`,
+    userId: donation.donorId,
+    title: 'Donation Review Update',
+    text: `Your donation request for \"${donation.bookTitle}\" was not approved. Review notes: ${normalizedReason}`,
+    type: 'Alert',
+    date: rejectionDate,
+    isRead: false,
+  };
+
+  setNotifications((currentNotifications) => [
+    notification,
+    ...currentNotifications,
+  ]);
+
+  return {
+    success: true,
+    message: `\"${donation.bookTitle}\" was rejected and the donor was notified.`,
+  };
+};
+
+
+const addAssistant = (name: string, email: string): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can create Assistant Librarian accounts.',
+    };
+  }
+
+  const normalizedName = name.trim();
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (!normalizedName || !normalizedEmail) {
+    return {
+      success: false,
+      message: 'Assistant name and university email are required.',
+    };
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return {
+      success: false,
+      message: 'Enter a valid Assistant email address.',
+    };
+  }
+
+  const duplicateEmail = assistants.some(
+    (assistant) => assistant.email.toLowerCase() === normalizedEmail,
+  );
+
+  if (duplicateEmail) {
+    return {
+      success: false,
+      message: 'An Assistant account already uses this email address.',
+    };
+  }
+
+  const nextAssistantNumber =
+    assistants.reduce((highestNumber, assistant) => {
+      const match = /^AST(\d+)$/i.exec(assistant.id);
+
+      if (!match) {
+        return highestNumber;
+      }
+
+      return Math.max(highestNumber, Number(match[1]));
+    }, 0) + 1;
+
+  const assistant: AssistantAccount = {
+    id: `AST${String(nextAssistantNumber).padStart(3, '0')}`,
+    name: normalizedName,
+    email: normalizedEmail,
+    createdAt: systemDate,
+  };
+
+  setAssistants((currentAssistants) => [assistant, ...currentAssistants]);
+
+  return {
+    success: true,
+    message: `Assistant account ${assistant.id} was created for ${assistant.name}.`,
+  };
+};
+
+
+const simulateTimeTravelDays = (days: number): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can simulate the library system date.',
+    };
+  }
+
+  if (!Number.isInteger(days) || days < 1 || days > 365) {
+    return {
+      success: false,
+      message: 'Enter a whole number of days between 1 and 365.',
+    };
+  }
+
+  const currentDateValue = new Date(`${systemDate}T00:00:00`);
+  const futureDate = toDateString(addDays(currentDateValue, days));
+  const futureTime = new Date(`${futureDate}T00:00:00`).getTime();
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+
+  const overdueUpdates = records.map((record) => {
+    if (record.status !== 'Borrowed') {
+      return record;
+    }
+
+    const dueTime = new Date(`${record.dueDate}T00:00:00`).getTime();
+
+    if (Number.isNaN(dueTime)) {
+      return record;
+    }
+
+    const lateDays = Math.max(
+      0,
+      Math.ceil((futureTime - dueTime) / millisecondsPerDay),
+    );
+
+    return {
+      ...record,
+      fineAmount: lateDays,
+      finePaid: lateDays > 0 ? false : record.finePaid,
+    };
+  });
+
+  const newlyOverdueRecords = overdueUpdates.filter(
+    (record) =>
+      record.status === 'Borrowed' &&
+      record.fineAmount > 0,
+  );
+
+  setRecords(overdueUpdates);
+  setSystemDate(futureDate);
+
+  setNotifications((currentNotifications) => {
+    const generatedAlerts: LibraryNotification[] = newlyOverdueRecords
+      .filter(
+        (record) =>
+          !currentNotifications.some(
+            (notification) =>
+              notification.userId === record.studentId &&
+              notification.title === 'Overdue Alert' &&
+              notification.date === futureDate &&
+              notification.text.includes(record.bookTitle),
+          ),
+      )
+      .map((record) => ({
+        id: `NT-${crypto.randomUUID()}`,
+        userId: record.studentId,
+        title: 'Overdue Alert',
+        text: `\"${record.bookTitle}\" was due on ${record.dueDate}. The current overdue fine is $${record.fineAmount.toFixed(2)}. Please return the book to the library counter.`,
+        type: 'Alert',
+        date: futureDate,
+        isRead: false,
+      }));
+
+    return [...generatedAlerts, ...currentNotifications];
+  });
+
+  return {
+    success: true,
+    message:
+      newlyOverdueRecords.length > 0
+        ? `System date advanced to ${futureDate}. ${newlyOverdueRecords.length} active loan${newlyOverdueRecords.length === 1 ? '' : 's'} are overdue and alerts were generated.`
+        : `System date advanced to ${futureDate}. No active loans are overdue.`,
+  };
+};
+
+const value: LibraryContextValue = {
     books,
     records,
     donations,
     assistants,
     notifications,
     currentUser,
+    currentSystemDate: systemDate,
     login,
     logout,
     requestBorrow,
     submitDonation,
+    confirmBorrowRequest,
+    issueBook,
+    returnBook,
+    settleFine,
+    addBook,
+    updateBook,
+    deleteBook,
+    approveDonation,
+    rejectDonation,
+    addAssistant,
+    simulateTimeTravelDays,
   };
-
-  return (
+return (
     <LibraryContext.Provider value={value}>
       {children}
     </LibraryContext.Provider>
   );
 }
-
 export function useLibrary(): LibraryContextValue {
-  const context = useContext(LibraryContext);
-
+const context = useContext(LibraryContext);
   if (!context) {
     throw new Error('useLibrary must be used within a LibraryProvider.');
   }
-
-  return context;
+return context;
 }
