@@ -37,13 +37,8 @@ function formatDate(value: string): string {
   }).format(date);
 }
 
-function getLateDays(dueDate: string): number {
-  const today = new Date();
-  const todayDate = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate(),
-  );
+function getLateDays(dueDate: string, systemDate: string): number {
+  const todayDate = new Date(`${systemDate}T00:00:00`);
   const due = new Date(`${dueDate}T00:00:00`);
   const millisecondsPerDay = 24 * 60 * 60 * 1000;
 
@@ -62,6 +57,7 @@ export function LibrarianDashboard() {
     issueBook,
     returnBook,
     settleFine,
+    currentSystemDate,
   } = useLibrary();
 
   const [feedback, setFeedback] =
@@ -360,7 +356,7 @@ export function LibrarianDashboard() {
         </h3>
 
         <p className="mt-1 text-sm text-slate-600">
-          Process returned books and record overdue fines automatically.
+          Process returned books and record overdue fines using the current simulated system date ({formatDate(currentSystemDate)}).
         </p>
       </div>
 
@@ -382,7 +378,7 @@ export function LibrarianDashboard() {
       ) : (
         <div className="space-y-4">
           {activeLoanRecords.map((record) => {
-            const lateDays = getLateDays(record.dueDate);
+            const lateDays = getLateDays(record.dueDate, currentSystemDate);
             const overdue = lateDays > 0;
 
             return (

@@ -62,6 +62,7 @@ interface LibraryContextValue {
   assistants: AssistantAccount[];
   notifications: LibraryNotification[];
   currentUser: User | null;
+  currentSystemDate: string;
   login: (
     universityId: string,
     role: User['role'],
@@ -84,6 +85,7 @@ interface LibraryContextValue {
   approveDonation: (donationId: string, shelfLocation: string) => ActionResult;
   rejectDonation: (donationId: string, reason: string) => ActionResult;
   addAssistant: (name: string, email: string) => ActionResult;
+  simulateTimeTravelDays: (days: number) => ActionResult;
 }
 interface LibraryProviderProps {
   children: ReactNode;
@@ -96,6 +98,7 @@ const STORAGE_KEYS = {
   notifications: 'lms_notifications',
   currentUser: 'lms_current_user',
   jwtToken: 'lms_jwt_token',
+  systemDate: 'lms_system_date',
 } as const;
 const SUPPORTED_GENRES: Genre[] = [
   'Algorithms',
@@ -153,6 +156,9 @@ const [notifications, setNotifications] =
 const [currentUser, setCurrentUser] = useState<User | null>(() =>
     loadFromStorage<User | null>(STORAGE_KEYS.currentUser, null),
   );
+const [systemDate, setSystemDate] = useState<string>(() =>
+    loadFromStorage(STORAGE_KEYS.systemDate, toDateString(new Date())),
+  );
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.books, JSON.stringify(books));
     localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(records));
@@ -162,7 +168,8 @@ const [currentUser, setCurrentUser] = useState<User | null>(() =>
       STORAGE_KEYS.notifications,
       JSON.stringify(notifications),
     );
-  }, [books, records, donations, assistants, notifications]);
+    localStorage.setItem(STORAGE_KEYS.systemDate, JSON.stringify(systemDate));
+  }, [books, records, donations, assistants, notifications, systemDate]);
   useEffect(() => {
 const token = localStorage.getItem(STORAGE_KEYS.jwtToken);
     if (!token) {
@@ -273,7 +280,7 @@ return {
         message: 'You already have an active request or loan for this book.',
       };
     }
-const requestDate = new Date();
+const requestDate = new Date(`${systemDate}T00:00:00`);
 const record: BorrowingRecord = {
       id: `BR-${crypto.randomUUID()}`,
       studentId: currentUser.universityId,
@@ -345,7 +352,7 @@ return {
         message: 'Temporary donations require a positive whole-number duration.',
       };
     }
-const today = new Date();
+const today = new Date(`${systemDate}T00:00:00`);
 const donation: Donation = {
       id: `DON-${crypto.randomUUID()}`,
       donorId: currentUser.universityId,
@@ -421,7 +428,7 @@ const confirmBorrowRequest = (recordId: string): ActionResult => {
     };
   }
 
-  const approvalDate = new Date();
+  const approvalDate = new Date(`${systemDate}T00:00:00`);
   const borrowDate = toDateString(approvalDate);
   const dueDate = toDateString(addDays(approvalDate, 14));
 
@@ -532,7 +539,7 @@ const issueBook = (
     };
   }
 
-  const issueDate = new Date();
+  const issueDate = new Date(`${systemDate}T00:00:00`);
   const borrowDate = toDateString(issueDate);
   const dueDate = toDateString(addDays(issueDate, 14));
 
@@ -616,7 +623,7 @@ const returnBook = (recordId: string): ActionResult => {
     };
   }
 
-  const returnDateValue = new Date();
+  const returnDateValue = new Date(`${systemDate}T00:00:00`);
   const returnDate = toDateString(returnDateValue);
   const dueDateValue = new Date(`${record.dueDate}T00:00:00`);
   const currentDateValue = new Date(`${returnDate}T00:00:00`);
@@ -735,7 +742,7 @@ const settleFine = (recordId: string): ActionResult => {
     ),
   );
 
-  const settlementDate = toDateString(new Date());
+  const settlementDate = systemDate;
   const notification: LibraryNotification = {
     id: `NT-${crypto.randomUUID()}`,
     userId: record.studentId,
@@ -1049,7 +1056,7 @@ const approveDonation = (
     ),
   );
 
-  const approvalDate = toDateString(new Date());
+  const approvalDate = systemDate;
   const finalShelfLocation = existingBook
     ? existingBook.shelfLocation
     : normalizedShelfLocation;
@@ -1125,7 +1132,7 @@ const rejectDonation = (
     ),
   );
 
-  const rejectionDate = toDateString(new Date());
+  const rejectionDate = systemDate;
   const notification: LibraryNotification = {
     id: `NT-${crypto.randomUUID()}`,
     userId: donation.donorId,
@@ -1199,7 +1206,7 @@ const addAssistant = (name: string, email: string): ActionResult => {
     id: `AST${String(nextAssistantNumber).padStart(3, '0')}`,
     name: normalizedName,
     email: normalizedEmail,
-    createdAt: toDateString(new Date()),
+    createdAt: systemDate,
   };
 
   setAssistants((currentAssistants) => [assistant, ...currentAssistants]);
@@ -1210,6 +1217,93 @@ const addAssistant = (name: string, email: string): ActionResult => {
   };
 };
 
+
+const simulateTimeTravelDays = (days: number): ActionResult => {
+  if (!currentUser || currentUser.role !== 'Manager') {
+    return {
+      success: false,
+      message: 'Only authenticated Managers can simulate the library system date.',
+    };
+  }
+
+  if (!Number.isInteger(days) || days < 1 || days > 365) {
+    return {
+      success: false,
+      message: 'Enter a whole number of days between 1 and 365.',
+    };
+  }
+
+  const currentDateValue = new Date(`${systemDate}T00:00:00`);
+  const futureDate = toDateString(addDays(currentDateValue, days));
+  const futureTime = new Date(`${futureDate}T00:00:00`).getTime();
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+
+  const overdueUpdates = records.map((record) => {
+    if (record.status !== 'Borrowed') {
+      return record;
+    }
+
+    const dueTime = new Date(`${record.dueDate}T00:00:00`).getTime();
+
+    if (Number.isNaN(dueTime)) {
+      return record;
+    }
+
+    const lateDays = Math.max(
+      0,
+      Math.ceil((futureTime - dueTime) / millisecondsPerDay),
+    );
+
+    return {
+      ...record,
+      fineAmount: lateDays,
+      finePaid: lateDays > 0 ? false : record.finePaid,
+    };
+  });
+
+  const newlyOverdueRecords = overdueUpdates.filter(
+    (record) =>
+      record.status === 'Borrowed' &&
+      record.fineAmount > 0,
+  );
+
+  setRecords(overdueUpdates);
+  setSystemDate(futureDate);
+
+  setNotifications((currentNotifications) => {
+    const generatedAlerts: LibraryNotification[] = newlyOverdueRecords
+      .filter(
+        (record) =>
+          !currentNotifications.some(
+            (notification) =>
+              notification.userId === record.studentId &&
+              notification.title === 'Overdue Alert' &&
+              notification.date === futureDate &&
+              notification.text.includes(record.bookTitle),
+          ),
+      )
+      .map((record) => ({
+        id: `NT-${crypto.randomUUID()}`,
+        userId: record.studentId,
+        title: 'Overdue Alert',
+        text: `\"${record.bookTitle}\" was due on ${record.dueDate}. The current overdue fine is $${record.fineAmount.toFixed(2)}. Please return the book to the library counter.`,
+        type: 'Alert',
+        date: futureDate,
+        isRead: false,
+      }));
+
+    return [...generatedAlerts, ...currentNotifications];
+  });
+
+  return {
+    success: true,
+    message:
+      newlyOverdueRecords.length > 0
+        ? `System date advanced to ${futureDate}. ${newlyOverdueRecords.length} active loan${newlyOverdueRecords.length === 1 ? '' : 's'} are overdue and alerts were generated.`
+        : `System date advanced to ${futureDate}. No active loans are overdue.`,
+  };
+};
+
 const value: LibraryContextValue = {
     books,
     records,
@@ -1217,6 +1311,7 @@ const value: LibraryContextValue = {
     assistants,
     notifications,
     currentUser,
+    currentSystemDate: systemDate,
     login,
     logout,
     requestBorrow,
@@ -1231,6 +1326,7 @@ const value: LibraryContextValue = {
     approveDonation,
     rejectDonation,
     addAssistant,
+    simulateTimeTravelDays,
   };
 return (
     <LibraryContext.Provider value={value}>
